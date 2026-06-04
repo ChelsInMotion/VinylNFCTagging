@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Now Playing</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    background: #0a0a0a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: Georgia, serif;
+  }
+  .container {
+    text-align: center;
+    padding: 2rem;
+    max-width: 480px;
+    width: 100%;
+  }
+
+  /* Now playing styles */
+  .label {
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: #c0392b;
+    text-transform: uppercase;
+    margin-bottom: 2.5rem;
+  }
+  .vinyl {
+    width: 160px;
+    height: 160px;
+    margin: 0 auto 2.5rem;
+    animation: spin 8s linear infinite;
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .artist {
+    font-family: monospace;
+    font-size: 12px;
+    letter-spacing: 0.15em;
+    color: #666;
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
+  }
+  .album {
+    font-size: 1.8rem;
+    color: #f0ece4;
+    line-height: 1.15;
+    margin-bottom: 2.5rem;
+  }
+  .divider {
+    width: 40px;
+    height: 1px;
+    background: #222;
+    margin: 0 auto 2rem;
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #444;
+  }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #c0392b;
+    animation: blink 1.4s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  /* Error styles */
+  .error-img {
+    width: 100%;
+    max-width: 400px;
+    border-radius: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="container" id="now-playing" style="display:none">
+  <div class="label">Now playing on Denon AVR-X4800H</div>
+  <svg class="vinyl" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="80" cy="80" r="78" fill="#111" stroke="#222" stroke-width="1"/>
+    <circle cx="80" cy="80" r="68" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+    <circle cx="80" cy="80" r="58" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+    <circle cx="80" cy="80" r="48" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+    <circle cx="80" cy="80" r="38" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+    <circle cx="80" cy="80" r="28" fill="none" stroke="#1a1a1a" stroke-width="1"/>
+    <circle cx="80" cy="80" r="22" fill="#c0392b"/>
+    <circle cx="80" cy="80" r="18" fill="#a93226"/>
+    <circle cx="80" cy="80" r="5" fill="#0a0a0a"/>
+  </svg>
+  <div class="artist" id="artist"></div>
+  <div class="album" id="album"></div>
+  <div class="divider"></div>
+  <div class="status">
+    <div class="dot"></div>
+    Playing now
+  </div>
+</div>
+
+<div class="container" id="error" style="display:none">
+  <img class="error-img" src="error.jpg" alt="Technical Difficulties — Please Stand By">
+</div>
+
+<script>
+  var params = new URLSearchParams(window.location.search);
+  var artist = params.get('artist');
+  var album = params.get('album');
+  var webhook = params.get('webhook');
+
+  if (artist && album && webhook) {
+    document.getElementById('artist').textContent = artist;
+    document.getElementById('album').textContent = album;
+    document.getElementById('now-playing').style.display = 'block';
+
+    window.addEventListener('load', function() {
+      setTimeout(function() {
+        fetch('https://hooks.nabu.casa/' + webhook, {
+          method: 'POST',
+          mode: 'no-cors'
+        }).catch(function() {});
+      }, 500);
+    });
+  } else {
+    document.getElementById('error').style.display = 'block';
+  }
+</script>
+</body>
+</html>
