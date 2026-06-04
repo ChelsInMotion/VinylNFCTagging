@@ -124,6 +124,17 @@
 </div>
 
 <script>
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) {
+      var vinyl = document.querySelector('.vinyl');
+      if (vinyl) {
+        vinyl.style.animation = 'none';
+        vinyl.offsetHeight; // force reflow
+        vinyl.style.animation = '';
+      }
+    }
+  });
+
   var params = new URLSearchParams(window.location.search);
   var artist = params.get('artist');
   var album = params.get('album');
