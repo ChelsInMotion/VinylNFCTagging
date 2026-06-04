@@ -121,6 +121,9 @@
           <stop offset="50%" stop-color="#ffffff" stop-opacity="0"/>
           <stop offset="100%" stop-color="#000000" stop-opacity="0.15"/>
         </radialGradient>
+        <clipPath id="label-clip">
+          <circle cx="80" cy="80" r="24"/>
+        </clipPath>
       </defs>
       <!-- Record base -->
       <circle cx="80" cy="80" r="78" fill="#1a1a1a" stroke="#333" stroke-width="1.5"/>
@@ -133,9 +136,9 @@
       <circle cx="80" cy="80" r="42" fill="none" stroke="#262626" stroke-width="1"/>
       <circle cx="80" cy="80" r="36" fill="none" stroke="#2a2a2a" stroke-width="1.5"/>
       <circle cx="80" cy="80" r="30" fill="none" stroke="#333" stroke-width="1"/>
-      <!-- Label -->
-      <circle cx="80" cy="80" r="24" fill="#c0392b"/>
-      <circle cx="80" cy="80" r="20" fill="#a93226"/>
+      <!-- Label (red fallback, replaced by album art if provided) -->
+      <circle cx="80" cy="80" r="24" fill="#c0392b" id="label-bg"/>
+      <image id="label-art" x="56" y="56" width="48" height="48" clip-path="url(#label-clip)" preserveAspectRatio="xMidYMid slice" style="display:none"/>
       <circle cx="80" cy="80" r="5" fill="#0a0a0a"/>
       <!-- Shimmer highlight -->
       <circle cx="80" cy="80" r="78" fill="url(#shimmer)"/>
@@ -181,11 +184,20 @@
   var artist = params.get('artist');
   var album = params.get('album');
   var webhook = params.get('webhook');
+  var art = params.get('art');
 
   if (artist && album && webhook) {
     document.getElementById('artist').textContent = artist;
     document.getElementById('album').textContent = album;
     document.getElementById('now-playing').style.display = 'block';
+
+    if (art) {
+      var labelArt = document.getElementById('label-art');
+      var labelBg = document.getElementById('label-bg');
+      labelArt.setAttribute('href', art);
+      labelArt.style.display = '';
+      labelBg.style.display = 'none';
+    }
 
     window.addEventListener('load', function() {
       setTimeout(function() {
