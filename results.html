@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Availability results</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    background: #f5f3ee;
+    color: #1d1d1f;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 2rem 1rem 4rem;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  .sub { color: #666; margin-bottom: 1.75rem; font-size: 0.95rem; }
+  .card { background: #fff; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+    padding: 1.75rem; margin-bottom: 1.5rem; }
+  .best { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .best .pill { background: #fdf3f2; border: 1px solid #c0392b; color: #c0392b;
+    padding: 0.5rem 0.9rem; border-radius: 999px; font-weight: 600; font-size: 0.95rem; }
+  h2 { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+    color: #999; margin-bottom: 1rem; }
+
+  /* Tally bars */
+  .tally { display: flex; flex-direction: column; gap: 0.7rem; }
+  .bar-row { display: grid; grid-template-columns: 150px 1fr auto; align-items: center; gap: 0.75rem; }
+  .bar-label { font-size: 0.9rem; }
+  .bar-label .dow { font-weight: 600; }
+  .bar-track { background: #efece4; border-radius: 8px; height: 26px; overflow: hidden; }
+  .bar-fill { background: #c0392b; height: 100%; border-radius: 8px; min-width: 2px; transition: width .4s; }
+  .bar-fill.top { background: #1f9d55; }
+  .bar-count { font-size: 0.85rem; color: #666; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  /* Matrix */
+  .matrix-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { padding: 0.55rem 0.6rem; text-align: center; border-bottom: 1px solid #efece4; }
+  th.name-col, td.name-col { text-align: left; white-space: nowrap; font-weight: 600; position: sticky; left: 0; background: #fff; }
+  thead th { font-size: 0.75rem; color: #888; font-weight: 600; }
+  .yes { color: #1f9d55; font-weight: 700; }
+  .no { color: #ddd; }
+  tr.totals td { font-weight: 700; border-top: 2px solid #e6e3dc; border-bottom: none; }
+
+  .state { text-align: center; color: #888; padding: 2rem; }
+  .links { text-align: center; font-size: 0.9rem; margin-top: 0.5rem; }
+  .links a { color: #c0392b; font-weight: 600; margin: 0 0.5rem; }
+  button.refresh { background: none; border: 1px solid #ddd; border-radius: 8px; padding: 0.4rem 0.8rem;
+    cursor: pointer; font-size: 0.85rem; color: #666; }
+  .warn { background:#fff7e6; border:1px solid #ffe0a3; color:#8a5a00; padding:0.85rem 1rem;
+    border-radius:10px; font-size:0.9rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="event-name">Results</h1>
+  <p class="sub" id="sub">Who can make which dates</p>
+
+  <div id="content">
+    <div class="card"><div class="state" id="loading">Loading responses…</div></div>
+  </div>
+
+  <div class="links">
+    <a href="availability.html">← Back to the form</a>
+    <button class="refresh" id="refresh">↻ Refresh</button>
+  </div>
+</div>
+
+<script src="schedule-config.js"></script>
+<script>
+  var cfg = window.SCHEDULE_CONFIG || {};
+  document.getElementById('event-name').textContent = (cfg.eventName || 'Event') + ' — Results';
+  document.title = (cfg.eventName ? cfg.eventName + ' — ' : '') + 'Results';
+
+  var fmt = function (iso) {
+    var p = iso.split('-');
+    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return {
+      dow: d.toLocaleDateString(undefined, { weekday: 'short' }),
+      dowLong: d.toLocaleDateString(undefined, { weekday: 'long' }),
+      full: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      fullLong: d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+    };
+  };
+
+  var content = document.getElementById('content');
+
+  function notConfigured() {
+    return !cfg.scriptUrl || cfg.scriptUrl.indexOf('PASTE') === 0;
+  }
+
+  // Read via JSONP so it works regardless of cross-origin CORS settings.
+  function load() {
+    if (notConfigured()) {
+      content.innerHTML = '<div class="card"><div class="warn">⚠️ Not connected yet — set ' +
+        '<code>scriptUrl</code> in <code>schedule-config.js</code>. See SCHEDULING_SETUP.md.</div></div>';
+      return;
+    }
+    content.innerHTML = '<div class="card"><div class="state">Loading responses…</div></div>';
+
+    var cbName = 'jsonp_' + Date.now();
+    var script = document.createElement('script');
+    var timer = setTimeout(function () {
+      cleanup();
+      content.innerHTML = '<div class="card"><div class="state">Couldn’t reach the sheet. ' +
+        'Double-check the deployment URL and that access is set to “Anyone”.</div></div>';
+    }, 12000);
+
+    function cleanup() {
+      clearTimeout(timer);
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[cbName] = function (data) {
+      cleanup();
+      render((data && data.responses) || []);
+    };
+
+    var sep = cfg.scriptUrl.indexOf('?') === -1 ? '?' : '&';
+    script.src = cfg.scriptUrl + sep + 'callback=' + cbName + '&t=' + Date.now();
+    script.onerror = function () {
+      cleanup();
+      content.innerHTML = '<div class="card"><div class="state">Couldn’t load responses.</div></div>';
+    };
+    document.body.appendChild(script);
+  }
+
+  function render(responses) {
+    // Build the ordered list of dates: config dates first, then any extra dates
+    // that showed up in responses (e.g. if the config changed since people replied).
+    var order = (cfg.dates || []).slice();
+    responses.forEach(function (r) {
+      (r.dates || []).forEach(function (d) { if (order.indexOf(d) === -1) order.push(d); });
+    });
+
+    if (!responses.length) {
+      content.innerHTML = '<div class="card"><div class="state">No responses yet. ' +
+        'Share the form link and check back here.</div></div>';
+      return;
+    }
+    if (!order.length) {
+      content.innerHTML = '<div class="card"><div class="state">No dates configured.</div></div>';
+      return;
+    }
+
+    // Tally counts per date.
+    var counts = {};
+    order.forEach(function (d) { counts[d] = 0; });
+    responses.forEach(function (r) {
+      (r.dates || []).forEach(function (d) { if (d in counts) counts[d]++; });
+    });
+    var max = Math.max.apply(null, order.map(function (d) { return counts[d]; }));
+    var total = responses.length;
+
+    // ── Best dates pills ──
+    var bestDates = order.filter(function (d) { return counts[d] === max && max > 0; });
+    var bestHtml = '<div class="card"><h2>Best overlap</h2><div class="best">';
+    if (max === 0) {
+      bestHtml += '<span class="sub">No one has marked any date as available yet.</span>';
+    } else {
+      bestHtml += '<span style="font-size:0.95rem;color:#666;">' + max + ' of ' + total +
+        ' available on:</span>';
+      bestDates.forEach(function (d) {
+        var f = fmt(d);
+        bestHtml += '<span class="pill">' + f.dowLong + ', ' + f.full + '</span>';
+      });
+    }
+    bestHtml += '</div></div>';
+
+    // ── Tally bars ──
+    var barHtml = '<div class="card"><h2>Count by date</h2><div class="tally">';
+    order.forEach(function (d) {
+      var f = fmt(d);
+      var c = counts[d];
+      var pct = total ? Math.round((c / total) * 100) : 0;
+      var isTop = c === max && max > 0;
+      barHtml += '<div class="bar-row">' +
+        '<div class="bar-label"><span class="dow">' + f.dow + '</span> ' + f.full + '</div>' +
+        '<div class="bar-track"><div class="bar-fill ' + (isTop ? 'top' : '') +
+          '" style="width:' + pct + '%"></div></div>' +
+        '<div class="bar-count">' + c + ' / ' + total + '</div>' +
+        '</div>';
+    });
+    barHtml += '</div></div>';
+
+    // ── Matrix ──
+    var m = '<div class="card"><h2>Who can make it</h2><div class="matrix-scroll"><table><thead><tr>' +
+      '<th class="name-col">Name</th>';
+    order.forEach(function (d) {
+      var f = fmt(d);
+      m += '<th>' + f.dow + '<br>' + f.full + '</th>';
+    });
+    m += '</tr></thead><tbody>';
+    responses.forEach(function (r) {
+      m += '<tr><td class="name-col">' + escapeHtml(r.name || '—') + '</td>';
+      order.forEach(function (d) {
+        var has = (r.dates || []).indexOf(d) !== -1;
+        m += '<td class="' + (has ? 'yes' : 'no') + '">' + (has ? '✓' : '·') + '</td>';
+      });
+      m += '</tr>';
+    });
+    m += '<tr class="totals"><td class="name-col">Total</td>';
+    order.forEach(function (d) { m += '<td>' + counts[d] + '</td>'; });
+    m += '</tr></tbody></table></div></div>';
+
+    content.innerHTML = bestHtml + barHtml + m;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  document.getElementById('refresh').addEventListener('click', load);
+  load();
+</script>
+</body>
+</html>

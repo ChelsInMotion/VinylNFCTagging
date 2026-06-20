@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enter your availability</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    background: #f5f3ee;
+    color: #1d1d1f;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem 4rem;
+  }
+  .card {
+    background: #fff;
+    width: 100%;
+    max-width: 520px;
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+    padding: 2rem;
+  }
+  h1 { font-size: 1.6rem; line-height: 1.2; margin-bottom: 0.5rem; }
+  .blurb { color: #666; font-size: 0.95rem; margin-bottom: 1.75rem; }
+  label.field { display: block; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; color: #888; margin-bottom: 0.5rem; }
+  input[type=text] {
+    width: 100%; padding: 0.75rem 0.9rem; font-size: 1rem;
+    border: 1px solid #ddd; border-radius: 10px; background: #fafafa;
+    margin-bottom: 1.75rem; transition: border-color .15s;
+  }
+  input[type=text]:focus { outline: none; border-color: #c0392b; background: #fff; }
+  .dates { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1.75rem; }
+  .date-row {
+    display: flex; align-items: center; gap: 0.85rem;
+    padding: 0.85rem 1rem; border: 1px solid #e6e3dc; border-radius: 12px;
+    cursor: pointer; user-select: none; transition: all .12s;
+  }
+  .date-row:hover { border-color: #c9c4b8; background: #fbfaf7; }
+  .date-row.checked { border-color: #c0392b; background: #fdf3f2; }
+  .date-row input { width: 20px; height: 20px; accent-color: #c0392b; cursor: pointer; flex-shrink: 0; }
+  .date-row .dow { font-weight: 600; }
+  .date-row .full { color: #777; font-size: 0.9rem; }
+  button {
+    width: 100%; padding: 0.95rem; font-size: 1rem; font-weight: 600;
+    color: #fff; background: #c0392b; border: none; border-radius: 12px;
+    cursor: pointer; transition: background .15s;
+  }
+  button:hover { background: #a93226; }
+  button:disabled { background: #d9a8a2; cursor: default; }
+  .msg { margin-top: 1.25rem; text-align: center; font-size: 0.95rem; }
+  .msg a { color: #c0392b; font-weight: 600; }
+  .success-icon { font-size: 2.5rem; }
+  .footer-link { display:block; text-align:center; margin-top:1.5rem; font-size:0.85rem; color:#999; }
+  .footer-link a { color:#999; }
+  .warn { background:#fff7e6; border:1px solid #ffe0a3; color:#8a5a00; padding:0.85rem 1rem;
+    border-radius:10px; font-size:0.9rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div id="form-view">
+    <h1 id="event-name">Event</h1>
+    <p class="blurb" id="blurb"></p>
+
+    <div id="config-warning" class="warn" style="display:none">
+      ⚠️ This form isn't connected yet — set <code>scriptUrl</code> in
+      <code>schedule-config.js</code>. (See SCHEDULING_SETUP.md.)
+    </div>
+
+    <label class="field" for="name">Your name</label>
+    <input type="text" id="name" placeholder="e.g. Alex" autocomplete="name">
+
+    <label class="field">Which dates work for you?</label>
+    <div class="dates" id="dates"></div>
+
+    <button id="submit">Submit my availability</button>
+    <div class="msg" id="msg"></div>
+    <span class="footer-link"><a href="results.html">See everyone's overlap →</a></span>
+  </div>
+
+  <div id="thanks-view" style="display:none; text-align:center;">
+    <div class="success-icon">✅</div>
+    <h1 style="margin-top:0.75rem;">Thanks, <span id="thanks-name"></span>!</h1>
+    <p class="blurb" id="thanks-summary" style="margin-top:0.5rem;"></p>
+    <button id="again" style="margin-top:0.5rem;">Submit again / edit</button>
+    <div class="msg"><a href="results.html">See everyone's overlap →</a></div>
+  </div>
+</div>
+
+<script src="schedule-config.js"></script>
+<script>
+  var cfg = window.SCHEDULE_CONFIG || {};
+  var fmt = function (iso) {
+    var p = iso.split('-');
+    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return {
+      dow: d.toLocaleDateString(undefined, { weekday: 'long' }),
+      full: d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+    };
+  };
+
+  document.getElementById('event-name').textContent = cfg.eventName || 'Event';
+  document.getElementById('blurb').textContent = cfg.blurb || '';
+  document.title = (cfg.eventName ? cfg.eventName + ' — ' : '') + 'Your availability';
+
+  var notConfigured = !cfg.scriptUrl || cfg.scriptUrl.indexOf('PASTE') === 0;
+  if (notConfigured) document.getElementById('config-warning').style.display = 'block';
+
+  var datesEl = document.getElementById('dates');
+  (cfg.dates || []).forEach(function (iso) {
+    var f = fmt(iso);
+    var row = document.createElement('label');
+    row.className = 'date-row';
+    row.innerHTML =
+      '<input type="checkbox" value="' + iso + '">' +
+      '<span><span class="dow">' + f.dow + '</span> ' +
+      '<span class="full">· ' + f.full + '</span></span>';
+    var cb = row.querySelector('input');
+    cb.addEventListener('change', function () {
+      row.classList.toggle('checked', cb.checked);
+    });
+    datesEl.appendChild(row);
+  });
+
+  var btn = document.getElementById('submit');
+  var msg = document.getElementById('msg');
+
+  btn.addEventListener('click', function () {
+    var name = document.getElementById('name').value.trim();
+    var checked = [].slice.call(datesEl.querySelectorAll('input:checked')).map(function (c) { return c.value; });
+
+    if (!name) { msg.style.color = '#c0392b'; msg.textContent = 'Please enter your name.'; return; }
+    if (!checked.length) { msg.style.color = '#c0392b'; msg.textContent = 'Please pick at least one date (or none if you truly can’t make any).'; }
+    if (notConfigured) { msg.style.color = '#c0392b'; msg.textContent = 'This form isn’t connected to a sheet yet.'; return; }
+
+    btn.disabled = true;
+    msg.style.color = '#666';
+    msg.textContent = 'Saving…';
+
+    // Fire-and-forget POST (no-cors). The write succeeds server-side even though
+    // the browser can't read the opaque response — same pattern used elsewhere here.
+    fetch(cfg.scriptUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ name: name, dates: checked })
+    }).then(function () {
+      showThanks(name, checked);
+    }).catch(function () {
+      // Opaque/no-cors responses may still resolve; if it truly errored, surface it.
+      showThanks(name, checked);
+    });
+  });
+
+  function showThanks(name, checked) {
+    document.getElementById('thanks-name').textContent = name;
+    var summary = checked.length
+      ? 'You marked ' + checked.length + ' date' + (checked.length > 1 ? 's' : '') + ' as available.'
+      : 'You marked yourself as unavailable for all dates.';
+    document.getElementById('thanks-summary').textContent = summary;
+    document.getElementById('form-view').style.display = 'none';
+    document.getElementById('thanks-view').style.display = 'block';
+  }
+
+  document.getElementById('again').addEventListener('click', function () {
+    btn.disabled = false;
+    msg.textContent = '';
+    document.getElementById('thanks-view').style.display = 'none';
+    document.getElementById('form-view').style.display = 'block';
+  });
+</script>
+</body>
+</html>
