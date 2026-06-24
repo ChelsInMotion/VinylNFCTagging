@@ -208,6 +208,8 @@
 </div>
 
 <script>
+  var pageLoadTime = performance.now ? performance.now() : 0;
+
   document.addEventListener('visibilitychange', function() {
     if (!document.hidden) {
       var vinyl = document.querySelector('.vinyl');
@@ -311,10 +313,12 @@
   var params = new URLSearchParams(window.location.search);
   var artist = params.get('artist');
   var album = params.get('album');
+  var track = params.get('track');   // song title (for lyrics lookup)
+  var dur = parseFloat(params.get('dur')) || 0;
   var webhook = params.get('webhook');
   var art = params.get('art');
   var lyrics = params.get('lyrics');
-  var startAt = parseFloat(params.get('t')) || 0; // seconds already elapsed in the track
+  var startAt = parseFloat(params.get('t')) || 0;
 
   if (artist && album) {
     document.getElementById('artist').textContent = artist;
@@ -330,7 +334,28 @@
     }
 
     if (lyrics) {
+      // Manual override (lyrics= param still works as a fallback).
       setupLyrics(lyrics, startAt);
+    } else if (track) {
+      // Fetch synced lyrics from lrclib.net directly in the browser.
+      // This keeps the HA URL short (no encoded lyrics), and lets us
+      // compensate for the time spent loading + fetching.
+      var lrcUrl = 'https://lrclib.net/api/get' +
+        '?artist_name=' + encodeURIComponent(artist || '') +
+        '&track_name=' + encodeURIComponent(track) +
+        (album ? '&album_name=' + encodeURIComponent(album) : '') +
+        (dur ? '&duration=' + Math.round(dur) : '');
+      fetch(lrcUrl)
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+          if (!data) return;
+          var lrc = data.syncedLyrics || data.plainLyrics;
+          if (!lrc) return;
+          // Add time elapsed since page load so lyrics land in sync.
+          var elapsed = startAt + ((performance.now ? performance.now() : pageLoadTime) - pageLoadTime) / 1000;
+          setupLyrics(lrc, elapsed);
+        })
+        .catch(function() {});
     }
 
     // Optionally fire a webhook on load (only if one was supplied).
