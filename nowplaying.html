@@ -230,13 +230,23 @@ const HA    = params.get('ha')    || 'http://192.168.1.220:8123';
 const TOKEN = params.get('token') || '';
 const MASS_ENTITY     = 'media_player.denon_avr_x4800h_3';
 const SPOTIFY_ENTITY  = 'media_player.spotifyplus_chelsea';
-// Players to watch, in priority order. The page uses whichever is actually
-// playing, so it works for Music Assistant (denon_3 — carries metadata for
-// every source: Spotify/Plex/YT), direct Spotify, etc.
+// Sibling MA player that exposes a healthy playback clock while CASTING
+// (e.g. Plexamp). During a cast the MA queue player (denon_3) reports a
+// nonsense position (past the track end), so we borrow this one's clock.
+const PLEX_CLOCK      = 'media_player.plex_music_assistant_music_assistant_plex';
+// Players to watch, in priority order — the page DISPLAYS whichever is playing.
 const ENTITIES = [MASS_ENTITY, SPOTIFY_ENTITY];
-// Seconds to nudge lyrics earlier, compensating for lrclib timestamps
-// running slightly late. Override per-URL with ?lead=1.5
-const LYRIC_LEAD = params.has('lead') ? parseFloat(params.get('lead')) : 1.0;
+// Extra entities consulted ONLY for a healthy clock (position), best first.
+const CLOCK_ENTITIES = [MASS_ENTITY, PLEX_CLOCK];
+// Per-mode lyric offset (seconds; + = earlier). When the displayed player's
+// own clock is healthy (vinyl / MA queue / direct), audio is ~in sync with
+// the clock. When we have to BORROW a sibling clock (casting), the real audio
+// is buffered well behind it, so we push the lyrics much later.
+const LEAD_DIRECT = 1.0;
+const LEAD_CAST   = -12.0;
+// ?lead=N forces a fixed offset, overriding the per-mode value.
+const MANUAL_LEAD = params.has('lead') ? parseFloat(params.get('lead')) : null;
+let   activeLead  = LEAD_DIRECT;
 // Add ?debug=1 to the URL to show a live readout in the top-left corner.
 const DEBUG = params.has('debug');
 
@@ -260,6 +270,10 @@ let activeIdx      = -1;
 // Live playback position tracking (refreshed each poll, advanced by ticker)
 let posBase = 0, posUpdatedAtMs = 0, isPlaying = false;
 let lastEntity = '', lastState = '';
+// Clock health (Option A/C): which entity's clock we're using, the mode, and
+// whether it's usable at all. When unhealthy, lyrics show static (Option C).
+let clockHealthy = true, clockMode = 'direct', clockEntity = '';
+let staticShown = false;
 
 const debugEl = document.getElementById('debug');
 if (DEBUG && debugEl) debugEl.style.display = 'block';
@@ -270,6 +284,16 @@ async function fetchState(entity) {
   });
   if (!res.ok) return null;
   return res.json();
+}
+
+// A playback clock is "sane" only if its position fits within the track.
+// Casting makes the MA queue player report positions past the track end.
+function clockSane(a) {
+  const p = a.media_position, d = a.media_duration;
+  return typeof p === 'number' && typeof d === 'number' && d > 0 && p >= -1 && p <= d + 2;
+}
+function sameTrack(a, title) {
+  return !!title && (a.media_title || '') === title;
 }
 
 function parseLRC(lrc) {
@@ -369,19 +393,36 @@ function updateActiveLineByTime(positionSec) {
 }
 
 function currentPosition() {
-  return posBase + (isPlaying ? (Date.now() - posUpdatedAtMs) / 1000 : 0) + LYRIC_LEAD;
+  return posBase + (isPlaying ? (Date.now() - posUpdatedAtMs) / 1000 : 0) + activeLead;
 }
 
 // Smooth highlight ticker — advances the active line between polls so the
 // highlight glides with the music instead of jumping every 3 seconds.
+// When the clock is unhealthy (e.g. casting with no borrowable clock),
+// freeze the lyrics in a readable static state instead of scrubbing wrong.
+function showStaticLyrics() {
+  if (staticShown) return;
+  staticShown = true;
+  activeIdx = -1;
+  for (const el of lyricEls) el.className = 'lyric-line plain';
+  lyricsInner.style.transform = 'translateY(0)';
+}
+
 setInterval(function () {
   const pos = currentPosition();
-  updateActiveLineByTime(pos);
+  if (lyricsSynced && clockHealthy) {
+    staticShown = false;
+    updateActiveLineByTime(pos);
+  } else if (lyricsSynced) {
+    showStaticLyrics();   // synced lyrics but no usable clock -> static (Option C)
+  }
   if (DEBUG && debugEl) {
     const first = lyricsLines.length ? lyricsLines[0].time : '-';
     const last = lyricsLines.length ? lyricsLines[lyricsLines.length - 1].time.toFixed(1) : '-';
     debugEl.textContent =
-      `entity:   ${lastEntity}\n` +
+      `display:  ${lastEntity}\n` +
+      `clock:    ${clockEntity} [${clockMode}]\n` +
+      `lead:     ${activeLead}  healthy:${clockHealthy}\n` +
       `state:    ${lastState}  playing:${isPlaying}\n` +
       `posBase:  ${posBase.toFixed(1)}\n` +
       `position: ${pos.toFixed(1)}\n` +
@@ -396,11 +437,14 @@ async function update() {
     // Read all candidate players and use whichever is actually playing
     // (prefer 'playing' over a stale 'paused'). This makes the page follow
     // Music Assistant, Spotify, Plex-via-MA — whatever is live right now.
-    const snaps = [];
-    for (const ent of ENTITIES) {
+    // Fetch every entity we might display OR borrow a clock from.
+    const allEnts = ENTITIES.concat(CLOCK_ENTITIES).filter((e, i, a) => a.indexOf(e) === i);
+    const byEnt = {};
+    for (const ent of allEnts) {
       const s = await fetchState(ent);
-      if (s) snaps.push({ ent: ent, s: s, attrs: s.attributes || {} });
+      if (s) byEnt[ent] = { ent: ent, s: s, attrs: s.attributes || {} };
     }
+    const snaps = ENTITIES.map(function (e) { return byEnt[e]; }).filter(Boolean);
     const chosen =
       snaps.find(function (x) { return x.s.state === 'playing' && x.attrs.media_title; }) ||
       snaps.find(function (x) { return x.s.state === 'paused'  && x.attrs.media_title; }) ||
@@ -454,12 +498,35 @@ async function update() {
         artPlaceholder.style.display = 'flex';
       }
 
-      // Refresh live position tracking every poll.
-      posBase = attrs.media_position || 0;
-      posUpdatedAtMs = attrs.media_position_updated_at
-        ? Date.parse(attrs.media_position_updated_at)
-        : Date.now();
-      isPlaying = (state === 'playing');
+      // --- Option A: choose the healthiest clock for THIS track ---
+      // Prefer the displayed player's own clock; if it's missing/insane (the
+      // cast quirk), borrow a sibling playing the same track with a sane
+      // position. If nothing is usable, mark the clock unhealthy (-> static).
+      let clk = null, borrowed = false;
+      const clockCands = [usedEntity].concat(CLOCK_ENTITIES).filter((e, i, a) => a.indexOf(e) === i);
+      for (const ent of clockCands) {
+        const c = byEnt[ent];
+        if (c && sameTrack(c.attrs, newTrack) && clockSane(c.attrs)) {
+          clk = c; borrowed = (ent !== usedEntity); break;
+        }
+      }
+      if (clk) {
+        clockHealthy = true;
+        clockEntity  = clk.ent;
+        clockMode    = borrowed ? 'cast' : 'direct';
+        posBase = clk.attrs.media_position || 0;
+        posUpdatedAtMs = clk.attrs.media_position_updated_at
+          ? Date.parse(clk.attrs.media_position_updated_at)
+          : Date.now();
+        isPlaying = (state === 'playing');
+        activeLead = (MANUAL_LEAD !== null) ? MANUAL_LEAD
+                                            : (borrowed ? LEAD_CAST : LEAD_DIRECT);
+      } else {
+        clockHealthy = false;      // Option C: no usable clock -> static lyrics
+        clockEntity  = '(none)';
+        clockMode    = 'static';
+        isPlaying    = false;
+      }
 
       // Fetch lyrics when the track changes. Keep the current lyrics on
       // screen until the new ones arrive, so there's no blank flash.
