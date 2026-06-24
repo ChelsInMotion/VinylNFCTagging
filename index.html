@@ -316,7 +316,7 @@
   var lyrics = params.get('lyrics');
   var startAt = parseFloat(params.get('t')) || 0; // seconds already elapsed in the track
 
-  if (artist && album && webhook) {
+  if (artist && album) {
     document.getElementById('artist').textContent = artist;
     document.getElementById('album').textContent = album;
     document.getElementById('now-playing').style.display = 'block';
@@ -333,14 +333,17 @@
       setupLyrics(lyrics, startAt);
     }
 
-    window.addEventListener('load', function() {
-      setTimeout(function() {
-        fetch('https://hooks.nabu.casa/' + webhook, {
-          method: 'POST',
-          mode: 'no-cors'
-        }).catch(function() {});
-      }, 500);
-    });
+    // Optionally fire a webhook on load (only if one was supplied).
+    if (webhook) {
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          fetch('https://hooks.nabu.casa/' + webhook, {
+            method: 'POST',
+            mode: 'no-cors'
+          }).catch(function() {});
+        }, 500);
+      });
+    }
   } else {
     document.getElementById('error').style.display = 'block';
   }
