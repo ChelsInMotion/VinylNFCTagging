@@ -444,20 +444,22 @@ async function update() {
         : Date.now();
       isPlaying = (state === 'playing');
 
-      // Fetch lyrics when the track changes.
+      // Fetch lyrics when the track changes. Keep the current lyrics on
+      // screen until the new ones arrive, so there's no blank flash.
       if (newTrack !== currentTrack || newArtist !== currentArtist) {
         currentTrack  = newTrack;
         currentArtist = newArtist;
-        lyricsLines   = [];
-        lyricsSynced  = false;
+        lyricsSynced  = false;   // pause highlighting during the fetch
         activeIdx     = -1;
-        renderLyrics(null, false);
 
         if (newTrack && newArtist) {
           const result = await fetchLyrics(newArtist, newTrack, attrs.media_album_name, attrs.media_duration);
           lyricsLines  = result ? result.lines : [];
           lyricsSynced = result ? result.synced : false;
           renderLyrics(lyricsLines, lyricsSynced);
+        } else {
+          lyricsLines = [];
+          renderLyrics(null, false);
         }
       }
 
