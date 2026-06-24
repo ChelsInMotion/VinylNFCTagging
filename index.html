@@ -340,20 +340,46 @@
       // Fetch synced lyrics from lrclib.net directly in the browser.
       // This keeps the HA URL short (no encoded lyrics), and lets us
       // compensate for the time spent loading + fetching.
-      var lrcUrl = 'https://lrclib.net/api/get' +
+      var getUrl = 'https://lrclib.net/api/get' +
         '?artist_name=' + encodeURIComponent(artist || '') +
         '&track_name=' + encodeURIComponent(track) +
         (album ? '&album_name=' + encodeURIComponent(album) : '') +
         (dur ? '&duration=' + Math.round(dur) : '');
-      fetch(lrcUrl)
+      var searchUrl = 'https://lrclib.net/api/search' +
+        '?artist_name=' + encodeURIComponent(artist || '') +
+        '&track_name=' + encodeURIComponent(track);
+
+      // Add time elapsed since page load so lyrics land in sync.
+      function showLyrics(lrc) {
+        if (!lrc) return;
+        var elapsed = startAt + ((performance.now ? performance.now() : pageLoadTime) - pageLoadTime) / 1000;
+        setupLyrics(lrc, elapsed);
+      }
+
+      // Pick the best entry from a search result list (prefer synced).
+      function pickFromList(list) {
+        if (!list || !list.length) return null;
+        for (var i = 0; i < list.length; i++) {
+          if (list[i].syncedLyrics) return list[i].syncedLyrics;
+        }
+        for (var j = 0; j < list.length; j++) {
+          if (list[j].plainLyrics) return list[j].plainLyrics;
+        }
+        return null;
+      }
+
+      // Try the exact-match endpoint first; if it misses, fall back to
+      // the fuzzy search endpoint (forgiving of album/duration mismatch).
+      fetch(getUrl)
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(data) {
-          if (!data) return;
-          var lrc = data.syncedLyrics || data.plainLyrics;
-          if (!lrc) return;
-          // Add time elapsed since page load so lyrics land in sync.
-          var elapsed = startAt + ((performance.now ? performance.now() : pageLoadTime) - pageLoadTime) / 1000;
-          setupLyrics(lrc, elapsed);
+          if (data && (data.syncedLyrics || data.plainLyrics)) {
+            showLyrics(data.syncedLyrics || data.plainLyrics);
+            return;
+          }
+          return fetch(searchUrl)
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(list) { showLyrics(pickFromList(list)); });
         })
         .catch(function() {});
     }
