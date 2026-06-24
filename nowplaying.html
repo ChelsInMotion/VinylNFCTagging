@@ -228,6 +228,9 @@ const HA    = params.get('ha')    || 'http://192.168.1.220:8123';
 const TOKEN = params.get('token') || '';
 const MASS_ENTITY     = 'media_player.denon_avr_x4800h_3';
 const SPOTIFY_ENTITY  = 'media_player.spotifyplus_chelsea';
+// Seconds to nudge lyrics earlier, compensating for lrclib timestamps
+// running slightly late. Override per-URL with ?lead=1.5
+const LYRIC_LEAD = params.has('lead') ? parseFloat(params.get('lead')) : 1.0;
 
 const container    = document.getElementById('container');
 const idle         = document.getElementById('idle');
@@ -354,7 +357,7 @@ function updateActiveLineByTime(positionSec) {
 }
 
 function currentPosition() {
-  return posBase + (isPlaying ? (Date.now() - posUpdatedAtMs) / 1000 : 0);
+  return posBase + (isPlaying ? (Date.now() - posUpdatedAtMs) / 1000 : 0) + LYRIC_LEAD;
 }
 
 // Smooth highlight ticker — advances the active line between polls so the
