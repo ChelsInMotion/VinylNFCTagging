@@ -26,9 +26,13 @@ MONO_SAT_MIN = 0.18   # below this max-saturation -> warm white fallback
 WARM_WHITE_K = 2700
 
 
+@pyscript_compile
 def _extract_palette(url, n=5):
     """Blocking: download art, return (list of RGB tuples, is_monochrome).
-    Runs in an executor thread so it never blocks HA's event loop."""
+    Runs in an executor thread so it never blocks HA's event loop.
+
+    @pyscript_compile makes this a plain Python function (not a pyscript
+    function), which is required to hand it to task.executor."""
     raw = urllib.request.urlopen(url, timeout=15).read()
     img = Image.open(BytesIO(raw)).convert("RGB").resize((120, 120))
     q = img.quantize(colors=12, method=Image.MEDIANCUT)
