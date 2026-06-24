@@ -230,6 +230,10 @@ const HA    = params.get('ha')    || 'http://192.168.1.220:8123';
 const TOKEN = params.get('token') || '';
 const MASS_ENTITY     = 'media_player.denon_avr_x4800h_3';
 const SPOTIFY_ENTITY  = 'media_player.spotifyplus_chelsea';
+// Players to watch, in priority order. The page uses whichever is actually
+// playing, so it works for Music Assistant (denon_3 — carries metadata for
+// every source: Spotify/Plex/YT), direct Spotify, etc.
+const ENTITIES = [MASS_ENTITY, SPOTIFY_ENTITY];
 // Seconds to nudge lyrics earlier, compensating for lrclib timestamps
 // running slightly late. Override per-URL with ?lead=1.5
 const LYRIC_LEAD = params.has('lead') ? parseFloat(params.get('lead')) : 1.0;
@@ -389,17 +393,30 @@ setInterval(function () {
 
 async function update() {
   try {
-    // Prefer the Spotify entity — it reports an accurate, fresh position.
-    // Fall back to the MASS/Denon entity only if Spotify isn't active.
-    let data = await fetchState(SPOTIFY_ENTITY);
-    let attrs = data ? (data.attributes || {}) : {};
-    let usedEntity = SPOTIFY_ENTITY;
-    const spUsable = data && (data.state === 'playing' || data.state === 'paused') && attrs.media_title;
-    if (!spUsable) {
-      const m = await fetchState(MASS_ENTITY);
-      if (m) { data = m; attrs = m.attributes || {}; usedEntity = MASS_ENTITY; }
+    // Read all candidate players and use whichever is actually playing
+    // (prefer 'playing' over a stale 'paused'). This makes the page follow
+    // Music Assistant, Spotify, Plex-via-MA — whatever is live right now.
+    const snaps = [];
+    for (const ent of ENTITIES) {
+      const s = await fetchState(ent);
+      if (s) snaps.push({ ent: ent, s: s, attrs: s.attributes || {} });
     }
-    if (!data) return;
+    const chosen =
+      snaps.find(function (x) { return x.s.state === 'playing' && x.attrs.media_title; }) ||
+      snaps.find(function (x) { return x.s.state === 'paused'  && x.attrs.media_title; }) ||
+      snaps.find(function (x) { return x.s.state === 'playing' || x.s.state === 'paused'; }) ||
+      null;
+
+    let data = chosen ? chosen.s : null;
+    let attrs = chosen ? chosen.attrs : {};
+    let usedEntity = chosen ? chosen.ent : '';
+    if (!data) {
+      container.style.display = 'none';
+      idle.style.display = 'block';
+      currentTrack = ''; currentArtist = ''; lyricsLines = []; lyricsSynced = false; isPlaying = false;
+      lastEntity = ''; lastState = 'idle';
+      return;
+    }
 
     const state = data.state;
     lastEntity = usedEntity;
