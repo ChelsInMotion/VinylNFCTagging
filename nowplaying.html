@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Now Playing</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0a;
+    color: #fff;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  #container {
+    display: flex;
+    align-items: center;
+    gap: 56px;
+    padding: 60px;
+    max-width: 1800px;
+    width: 100%;
+    height: 100vh;
+  }
+
+  #art-wrap {
+    flex-shrink: 0;
+    width: 440px;
+    height: 440px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #1a1a1a;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.8);
+  }
+
+  #art {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: none;
+  }
+
+  #art-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #art-placeholder svg {
+    width: 120px;
+    height: 120px;
+    opacity: 0.15;
+  }
+
+  #info {
+    flex: 0 0 320px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  #state-badge {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #888;
+    margin-bottom: 24px;
+  }
+
+  #state-badge.playing { color: #1db954; }
+
+  #track {
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 20px;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+
+  #artist {
+    font-size: 28px;
+    font-weight: 500;
+    color: #ccc;
+    margin-bottom: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #album {
+    font-size: 22px;
+    font-weight: 400;
+    color: #666;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Lyrics column */
+  #lyrics-col {
+    flex: 1;
+    min-width: 0;
+    height: calc(100vh - 120px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  #lyrics-col::before,
+  #lyrics-col::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    height: 120px;
+    pointer-events: none;
+    z-index: 2;
+  }
+  #lyrics-col::before { top: 0; background: linear-gradient(to bottom, #0a0a0a, transparent); }
+  #lyrics-col::after  { bottom: 0; background: linear-gradient(to top, #0a0a0a, transparent); }
+
+  #lyrics-scroll {
+    overflow: hidden;
+    height: 100%;
+    position: relative;
+  }
+
+  #lyrics-inner {
+    transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 40vh 0;
+  }
+
+  .lyric-line {
+    font-size: 26px;
+    font-weight: 500;
+    line-height: 1.6;
+    color: #333;
+    transition: color 0.4s ease, font-size 0.4s ease;
+    padding: 4px 0;
+    cursor: default;
+    white-space: pre-wrap;
+  }
+
+  .lyric-line.active {
+    color: #fff;
+    font-size: 30px;
+  }
+
+  .lyric-line.past {
+    color: #444;
+  }
+
+  #lyrics-empty {
+    font-size: 18px;
+    color: #333;
+    font-style: italic;
+  }
+
+  #idle {
+    text-align: center;
+  }
+
+  #idle .big {
+    font-size: 80px;
+    opacity: 0.08;
+  }
+
+  #idle .msg {
+    font-size: 28px;
+    color: #444;
+    margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+
+<div id="container" style="display:none">
+  <div id="art-wrap">
+    <img id="art" alt="">
+    <div id="art-placeholder">
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1">
+        <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
+        <line x1="12" y1="2" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="22"/>
+      </svg>
+    </div>
+  </div>
+  <div id="info">
+    <div id="state-badge">Now Playing</div>
+    <div id="track">—</div>
+    <div id="artist">—</div>
+    <div id="album">—</div>
+  </div>
+  <div id="lyrics-col">
+    <div id="lyrics-scroll">
+      <div id="lyrics-inner">
+        <div id="lyrics-empty" class="lyric-line">No lyrics found</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="idle">
+  <div class="big">♫</div>
+  <div class="msg">Waiting for music…</div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const HA    = params.get('ha')    || 'http://192.168.1.220:8123';
+const TOKEN = params.get('token') || '';
+const MASS_ENTITY     = 'media_player.denon_avr_x4800h_3';
+const SPOTIFY_ENTITY  = 'media_player.spotifyplus_chelsea';
+
+const container    = document.getElementById('container');
+const idle         = document.getElementById('idle');
+const art          = document.getElementById('art');
+const artPlaceholder = document.getElementById('art-placeholder');
+const stateBadge   = document.getElementById('state-badge');
+const trackEl      = document.getElementById('track');
+const artistEl     = document.getElementById('artist');
+const albumEl      = document.getElementById('album');
+const lyricsInner  = document.getElementById('lyrics-inner');
+const lyricsEmpty  = document.getElementById('lyrics-empty');
+
+let lyricsLines    = [];   // [{time, text}]
+let currentTrack   = '';
+let currentArtist  = '';
+let lyricEls       = [];
+let activeIdx      = -1;
+
+async function fetchState(entity) {
+  const res = await fetch(`${HA}/api/states/${entity}`, {
+    headers: { 'Authorization': `Bearer ${TOKEN}` }
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+function parseLRC(lrc) {
+  const lines = [];
+  for (const raw of lrc.split('\n')) {
+    const m = raw.match(/^\[(\d+):(\d+\.\d+)\](.*)/);
+    if (!m) continue;
+    const time = parseInt(m[1]) * 60 + parseFloat(m[2]);
+    const text = m[3].trim();
+    lines.push({ time, text });
+  }
+  return lines.sort((a, b) => a.time - b.time);
+}
+
+async function fetchLyrics(artist, track) {
+  try {
+    const url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(track)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.syncedLyrics) return parseLRC(data.syncedLyrics);
+    if (data.plainLyrics) {
+      return data.plainLyrics.split('\n').map((text, i) => ({ time: i * 3, text }));
+    }
+  } catch (e) {}
+  return null;
+}
+
+function renderLyrics(lines) {
+  lyricsInner.innerHTML = '';
+  lyricEls = [];
+  activeIdx = -1;
+
+  if (!lines || lines.length === 0) {
+    const el = document.createElement('div');
+    el.className = 'lyric-line';
+    el.textContent = 'No lyrics found';
+    lyricsInner.appendChild(el);
+    return;
+  }
+
+  for (const line of lines) {
+    const el = document.createElement('div');
+    el.className = 'lyric-line';
+    el.textContent = line.text || '';
+    lyricsInner.appendChild(el);
+    lyricEls.push(el);
+  }
+}
+
+function scrollToLine(idx) {
+  if (idx < 0 || idx >= lyricEls.length) return;
+  const el = lyricEls[idx];
+  const scrollEl = document.getElementById('lyrics-scroll');
+  const scrollH = scrollEl.offsetHeight;
+  const elTop = el.offsetTop;
+  const elH = el.offsetHeight;
+  const offset = elTop - (scrollH / 2) + (elH / 2) - 40 /* padding-top of inner */;
+  lyricsInner.style.transform = `translateY(${-offset}px)`;
+}
+
+function updateActiveLineByTime(positionSec) {
+  if (!lyricsLines.length || !lyricEls.length) return;
+
+  let idx = -1;
+  for (let i = 0; i < lyricsLines.length; i++) {
+    if (lyricsLines[i].time <= positionSec) idx = i;
+    else break;
+  }
+
+  if (idx === activeIdx) return;
+  activeIdx = idx;
+
+  for (let i = 0; i < lyricEls.length; i++) {
+    if (i < idx) {
+      lyricEls[i].className = 'lyric-line past';
+    } else if (i === idx) {
+      lyricEls[i].className = 'lyric-line active';
+    } else {
+      lyricEls[i].className = 'lyric-line';
+    }
+  }
+
+  scrollToLine(idx);
+}
+
+async function update() {
+  try {
+    let data = await fetchState(MASS_ENTITY);
+    const massAttrs = data ? (data.attributes || {}) : {};
+    if (!data || data.state !== 'playing' || !massAttrs.media_title) {
+      data = await fetchState(SPOTIFY_ENTITY);
+    }
+    if (!data) return;
+
+    const attrs = data.attributes || {};
+    const state = data.state;
+
+    if (state === 'playing' || state === 'paused') {
+      container.style.display = 'flex';
+      idle.style.display = 'none';
+
+      stateBadge.textContent = state === 'playing' ? 'Now Playing' : 'Paused';
+      stateBadge.className   = state === 'playing' ? 'playing' : '';
+
+      const newTrack  = attrs.media_title  || '';
+      const newArtist = attrs.media_artist || '';
+
+      trackEl.textContent  = newTrack  || '—';
+      artistEl.textContent = newArtist || '—';
+      albumEl.textContent  = attrs.media_album_name || '—';
+
+      if (attrs.entity_picture) {
+        const artUrl = attrs.entity_picture.startsWith('http')
+          ? attrs.entity_picture
+          : `${HA}${attrs.entity_picture}`;
+        if (art.src !== artUrl) {
+          art.src = artUrl;
+          art.style.display = 'block';
+          artPlaceholder.style.display = 'none';
+          art.onerror = () => {
+            art.style.display = 'none';
+            artPlaceholder.style.display = 'flex';
+          };
+        }
+      } else {
+        art.style.display = 'none';
+        artPlaceholder.style.display = 'flex';
+      }
+
+      // Fetch lyrics when track changes
+      if (newTrack !== currentTrack || newArtist !== currentArtist) {
+        currentTrack  = newTrack;
+        currentArtist = newArtist;
+        lyricsLines   = [];
+        activeIdx     = -1;
+        renderLyrics(null);
+
+        if (newTrack && newArtist) {
+          const lines = await fetchLyrics(newArtist, newTrack);
+          lyricsLines = lines || [];
+          renderLyrics(lyricsLines);
+        }
+      }
+
+      // Sync lyrics to playback position, correcting for HA's stale snapshot
+      const basePosition = attrs.media_position || 0;
+      const updatedAt = attrs.media_position_updated_at
+        ? Date.parse(attrs.media_position_updated_at) / 1000
+        : null;
+      const elapsed = (state === 'playing' && updatedAt)
+        ? (Date.now() / 1000 - updatedAt)
+        : 0;
+      const position = basePosition + elapsed;
+      updateActiveLineByTime(position);
+
+    } else {
+      container.style.display = 'none';
+      idle.style.display = 'block';
+      currentTrack  = '';
+      currentArtist = '';
+      lyricsLines   = [];
+    }
+  } catch (e) {
+    // silently retry
+  }
+}
+
+update();
+setInterval(update, 3000);
+</script>
+</body>
+</html>
