@@ -108,6 +108,32 @@
     text-overflow: ellipsis;
   }
 
+  /* Transport controls */
+  #controls {
+    display: flex;
+    gap: 18px;
+    margin-top: 36px;
+  }
+  .ctl {
+    width: 66px;
+    height: 66px;
+    border-radius: 50%;
+    border: 1px solid #333;
+    background: rgba(255,255,255,0.06);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease, transform 0.08s ease, border-color 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ctl:hover, .ctl:focus { background: rgba(255,255,255,0.16); border-color: #555; outline: none; }
+  .ctl:active { transform: scale(0.92); }
+  .ctl.flash { background: #1db954; border-color: #1db954; }
+  .ctl svg { width: 28px; height: 28px; fill: #fff; pointer-events: none; }
+  #btn-play { background: rgba(255,255,255,0.12); }
+
   /* Lyrics column */
   #lyrics-col {
     flex: 1;
@@ -207,6 +233,11 @@
     <div id="track">—</div>
     <div id="artist">—</div>
     <div id="album">—</div>
+    <div id="controls">
+      <button id="btn-prev" class="ctl" aria-label="Previous track"></button>
+      <button id="btn-play" class="ctl" aria-label="Play or pause"></button>
+      <button id="btn-next" class="ctl" aria-label="Next track"></button>
+    </div>
   </div>
   <div id="lyrics-col">
     <div id="lyrics-scroll">
@@ -240,6 +271,15 @@ const LYRIC_LEAD = params.has('lead') ? parseFloat(params.get('lead')) : 1.0;
 // Add ?debug=1 to the URL to show a live readout in the top-left corner.
 const DEBUG = params.has('debug');
 
+// Transport controls fire HA webhooks (no token needed). Create matching
+// webhook-trigger automations in HA with these IDs. The phone page uses the
+// same IDs via hooks.nabu.casa.
+const WEBHOOKS = { prev: 'np_prev_7Gk29Qm4xZ', playpause: 'np_playpause_7Gk29Qm4xZ', next: 'np_next_7Gk29Qm4xZ' };
+const ICON_PREV  = '<svg viewBox="0 0 24 24"><path d="M7 6h2v12H7zM19 6v12l-8-6z"/></svg>';
+const ICON_NEXT  = '<svg viewBox="0 0 24 24"><path d="M15 6h2v12h-2zM5 6v12l8-6z"/></svg>';
+const ICON_PLAY  = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>';
+
 const container    = document.getElementById('container');
 const idle         = document.getElementById('idle');
 const art          = document.getElementById('art');
@@ -249,6 +289,9 @@ const trackEl      = document.getElementById('track');
 const artistEl     = document.getElementById('artist');
 const albumEl      = document.getElementById('album');
 const lyricsInner  = document.getElementById('lyrics-inner');
+const btnPrev      = document.getElementById('btn-prev');
+const btnPlay      = document.getElementById('btn-play');
+const btnNext      = document.getElementById('btn-next');
 
 let lyricsLines    = [];   // [{time, text}]
 let lyricsSynced   = false;
@@ -460,6 +503,7 @@ async function update() {
         ? Date.parse(attrs.media_position_updated_at)
         : Date.now();
       isPlaying = (state === 'playing');
+      setPlayIcon();
 
       // Fetch lyrics when the track changes. Keep the current lyrics on
       // screen until the new ones arrive, so there's no blank flash.
@@ -493,6 +537,25 @@ async function update() {
     // silently retry
   }
 }
+
+// Wire up transport buttons. They POST to local HA webhooks (no token);
+// HA's webhook automation sends play/pause/next/prev to the active player.
+btnPrev.innerHTML = ICON_PREV;
+btnNext.innerHTML = ICON_NEXT;
+btnPlay.innerHTML = ICON_PLAY;
+
+function setPlayIcon() { btnPlay.innerHTML = isPlaying ? ICON_PAUSE : ICON_PLAY; }
+function flashBtn(btn) {
+  btn.classList.add('flash');
+  setTimeout(function () { btn.classList.remove('flash'); }, 220);
+}
+function sendCmd(id, btn) {
+  flashBtn(btn);
+  fetch(`${HA}/api/webhook/${id}`, { method: 'POST', mode: 'no-cors' }).catch(function () {});
+}
+btnPrev.addEventListener('click', function () { sendCmd(WEBHOOKS.prev, btnPrev); });
+btnNext.addEventListener('click', function () { sendCmd(WEBHOOKS.next, btnNext); });
+btnPlay.addEventListener('click', function () { sendCmd(WEBHOOKS.playpause, btnPlay); });
 
 update();
 setInterval(update, 3000);
