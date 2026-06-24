@@ -6,3 +6,6 @@
 # Local backup copies of pages (don't track these)
 *.backup.html
 * - Copy.html
+
+# Local tooling (Claude Code preview-server config, etc.)
+.claude/
