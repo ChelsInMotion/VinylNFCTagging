@@ -1,0 +1,8 @@
+# Editor / OS backup litter
+*~
+*.bak
+*.orig
+
+# Local backup copies of pages (don't track these)
+*.backup.html
+* - Copy.html

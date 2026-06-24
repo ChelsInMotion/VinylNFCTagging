@@ -163,6 +163,11 @@
     color: #444;
   }
 
+  /* Plain (un-timestamped) lyrics: readable, no highlight/scroll */
+  .lyric-line.plain {
+    color: #999;
+  }
+
   #lyrics-empty {
     font-size: 18px;
     color: #333;
@@ -217,12 +222,23 @@
   <div class="msg">Waiting for music…</div>
 </div>
 
+<div id="debug" style="position:fixed;top:0;left:0;background:rgba(0,0,0,0.85);color:#0f0;font:14px monospace;padding:10px;white-space:pre;z-index:99;display:none;border-bottom-right-radius:8px"></div>
+
 <script>
 const params = new URLSearchParams(window.location.search);
 const HA    = params.get('ha')    || 'http://192.168.1.220:8123';
 const TOKEN = params.get('token') || '';
 const MASS_ENTITY     = 'media_player.denon_avr_x4800h_3';
 const SPOTIFY_ENTITY  = 'media_player.spotifyplus_chelsea';
+// Players to watch, in priority order. The page uses whichever is actually
+// playing, so it works for Music Assistant (denon_3 — carries metadata for
+// every source: Spotify/Plex/YT), direct Spotify, etc.
+const ENTITIES = [MASS_ENTITY, SPOTIFY_ENTITY];
+// Seconds to nudge lyrics earlier, compensating for lrclib timestamps
+// running slightly late. Override per-URL with ?lead=1.5
+const LYRIC_LEAD = params.has('lead') ? parseFloat(params.get('lead')) : 1.0;
+// Add ?debug=1 to the URL to show a live readout in the top-left corner.
+const DEBUG = params.has('debug');
 
 const container    = document.getElementById('container');
 const idle         = document.getElementById('idle');
@@ -233,13 +249,20 @@ const trackEl      = document.getElementById('track');
 const artistEl     = document.getElementById('artist');
 const albumEl      = document.getElementById('album');
 const lyricsInner  = document.getElementById('lyrics-inner');
-const lyricsEmpty  = document.getElementById('lyrics-empty');
 
 let lyricsLines    = [];   // [{time, text}]
+let lyricsSynced   = false;
 let currentTrack   = '';
 let currentArtist  = '';
 let lyricEls       = [];
 let activeIdx      = -1;
+
+// Live playback position tracking (refreshed each poll, advanced by ticker)
+let posBase = 0, posUpdatedAtMs = 0, isPlaying = false;
+let lastEntity = '', lastState = '';
+
+const debugEl = document.getElementById('debug');
+if (DEBUG && debugEl) debugEl.style.display = 'block';
 
 async function fetchState(entity) {
   const res = await fetch(`${HA}/api/states/${entity}`, {
@@ -252,7 +275,7 @@ async function fetchState(entity) {
 function parseLRC(lrc) {
   const lines = [];
   for (const raw of lrc.split('\n')) {
-    const m = raw.match(/^\[(\d+):(\d+\.\d+)\](.*)/);
+    const m = raw.match(/^\[(\d+):(\d+(?:\.\d+)?)\](.*)/);
     if (!m) continue;
     const time = parseInt(m[1]) * 60 + parseFloat(m[2]);
     const text = m[3].trim();
@@ -261,21 +284,37 @@ function parseLRC(lrc) {
   return lines.sort((a, b) => a.time - b.time);
 }
 
-async function fetchLyrics(artist, track) {
+// Returns {lines, synced} or null. Prefers a real synced version from
+// lrclib (exact match first, then fuzzy search); only uses plain as a
+// last resort and never fakes timestamps for it.
+async function fetchLyrics(artist, track, album, duration) {
   try {
-    const url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(track)}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.syncedLyrics) return parseLRC(data.syncedLyrics);
-    if (data.plainLyrics) {
-      return data.plainLyrics.split('\n').map((text, i) => ({ time: i * 3, text }));
+    let getUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(track)}`;
+    if (album)    getUrl += `&album_name=${encodeURIComponent(album)}`;
+    if (duration) getUrl += `&duration=${Math.round(duration)}`;
+    let res = await fetch(getUrl);
+    let data = res.ok ? await res.json() : null;
+    if (data && data.syncedLyrics) return { lines: parseLRC(data.syncedLyrics), synced: true };
+
+    const searchUrl = `https://lrclib.net/api/search?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(track)}`;
+    res = await fetch(searchUrl);
+    const list = res.ok ? await res.json() : null;
+    if (list && list.length) {
+      for (const item of list) {
+        if (item.syncedLyrics) return { lines: parseLRC(item.syncedLyrics), synced: true };
+      }
+      for (const item of list) {
+        if (item.plainLyrics) return { lines: item.plainLyrics.split('\n').map(t => ({ time: null, text: t })), synced: false };
+      }
+    }
+    if (data && data.plainLyrics) {
+      return { lines: data.plainLyrics.split('\n').map(t => ({ time: null, text: t })), synced: false };
     }
   } catch (e) {}
   return null;
 }
 
-function renderLyrics(lines) {
+function renderLyrics(lines, synced) {
   lyricsInner.innerHTML = '';
   lyricEls = [];
   activeIdx = -1;
@@ -290,7 +329,8 @@ function renderLyrics(lines) {
 
   for (const line of lines) {
     const el = document.createElement('div');
-    el.className = 'lyric-line';
+    // Plain (unsynced) lyrics render in a readable static color.
+    el.className = synced ? 'lyric-line' : 'lyric-line plain';
     el.textContent = line.text || '';
     lyricsInner.appendChild(el);
     lyricEls.push(el);
@@ -309,7 +349,7 @@ function scrollToLine(idx) {
 }
 
 function updateActiveLineByTime(positionSec) {
-  if (!lyricsLines.length || !lyricEls.length) return;
+  if (!lyricsSynced || !lyricsLines.length || !lyricEls.length) return;
 
   let idx = -1;
   for (let i = 0; i < lyricsLines.length; i++) {
@@ -321,29 +361,66 @@ function updateActiveLineByTime(positionSec) {
   activeIdx = idx;
 
   for (let i = 0; i < lyricEls.length; i++) {
-    if (i < idx) {
-      lyricEls[i].className = 'lyric-line past';
-    } else if (i === idx) {
-      lyricEls[i].className = 'lyric-line active';
-    } else {
-      lyricEls[i].className = 'lyric-line';
-    }
+    if (i < idx) lyricEls[i].className = 'lyric-line past';
+    else if (i === idx) lyricEls[i].className = 'lyric-line active';
+    else lyricEls[i].className = 'lyric-line';
   }
-
   scrollToLine(idx);
 }
 
+function currentPosition() {
+  return posBase + (isPlaying ? (Date.now() - posUpdatedAtMs) / 1000 : 0) + LYRIC_LEAD;
+}
+
+// Smooth highlight ticker — advances the active line between polls so the
+// highlight glides with the music instead of jumping every 3 seconds.
+setInterval(function () {
+  const pos = currentPosition();
+  updateActiveLineByTime(pos);
+  if (DEBUG && debugEl) {
+    const first = lyricsLines.length ? lyricsLines[0].time : '-';
+    const last = lyricsLines.length ? lyricsLines[lyricsLines.length - 1].time.toFixed(1) : '-';
+    debugEl.textContent =
+      `entity:   ${lastEntity}\n` +
+      `state:    ${lastState}  playing:${isPlaying}\n` +
+      `posBase:  ${posBase.toFixed(1)}\n` +
+      `position: ${pos.toFixed(1)}\n` +
+      `synced:   ${lyricsSynced}  lines:${lyricsLines.length}\n` +
+      `activeIdx:${activeIdx}\n` +
+      `lyricTimes: ${first} .. ${last}`;
+  }
+}, 200);
+
 async function update() {
   try {
-    let data = await fetchState(MASS_ENTITY);
-    const massAttrs = data ? (data.attributes || {}) : {};
-    if (!data || data.state !== 'playing' || !massAttrs.media_title) {
-      data = await fetchState(SPOTIFY_ENTITY);
+    // Read all candidate players and use whichever is actually playing
+    // (prefer 'playing' over a stale 'paused'). This makes the page follow
+    // Music Assistant, Spotify, Plex-via-MA — whatever is live right now.
+    const snaps = [];
+    for (const ent of ENTITIES) {
+      const s = await fetchState(ent);
+      if (s) snaps.push({ ent: ent, s: s, attrs: s.attributes || {} });
     }
-    if (!data) return;
+    const chosen =
+      snaps.find(function (x) { return x.s.state === 'playing' && x.attrs.media_title; }) ||
+      snaps.find(function (x) { return x.s.state === 'paused'  && x.attrs.media_title; }) ||
+      snaps.find(function (x) { return x.s.state === 'playing' || x.s.state === 'paused'; }) ||
+      null;
 
-    const attrs = data.attributes || {};
+    let data = chosen ? chosen.s : null;
+    let attrs = chosen ? chosen.attrs : {};
+    let usedEntity = chosen ? chosen.ent : '';
+    if (!data) {
+      container.style.display = 'none';
+      idle.style.display = 'block';
+      currentTrack = ''; currentArtist = ''; lyricsLines = []; lyricsSynced = false; isPlaying = false;
+      lastEntity = ''; lastState = 'idle';
+      return;
+    }
+
     const state = data.state;
+    lastEntity = usedEntity;
+    lastState = state;
 
     if (state === 'playing' || state === 'paused') {
       container.style.display = 'flex';
@@ -377,31 +454,31 @@ async function update() {
         artPlaceholder.style.display = 'flex';
       }
 
-      // Fetch lyrics when track changes
+      // Refresh live position tracking every poll.
+      posBase = attrs.media_position || 0;
+      posUpdatedAtMs = attrs.media_position_updated_at
+        ? Date.parse(attrs.media_position_updated_at)
+        : Date.now();
+      isPlaying = (state === 'playing');
+
+      // Fetch lyrics when the track changes. Keep the current lyrics on
+      // screen until the new ones arrive, so there's no blank flash.
       if (newTrack !== currentTrack || newArtist !== currentArtist) {
         currentTrack  = newTrack;
         currentArtist = newArtist;
-        lyricsLines   = [];
+        lyricsSynced  = false;   // pause highlighting during the fetch
         activeIdx     = -1;
-        renderLyrics(null);
 
         if (newTrack && newArtist) {
-          const lines = await fetchLyrics(newArtist, newTrack);
-          lyricsLines = lines || [];
-          renderLyrics(lyricsLines);
+          const result = await fetchLyrics(newArtist, newTrack, attrs.media_album_name, attrs.media_duration);
+          lyricsLines  = result ? result.lines : [];
+          lyricsSynced = result ? result.synced : false;
+          renderLyrics(lyricsLines, lyricsSynced);
+        } else {
+          lyricsLines = [];
+          renderLyrics(null, false);
         }
       }
-
-      // Sync lyrics to playback position, correcting for HA's stale snapshot
-      const basePosition = attrs.media_position || 0;
-      const updatedAt = attrs.media_position_updated_at
-        ? Date.parse(attrs.media_position_updated_at) / 1000
-        : null;
-      const elapsed = (state === 'playing' && updatedAt)
-        ? (Date.now() / 1000 - updatedAt)
-        : 0;
-      const position = basePosition + elapsed;
-      updateActiveLineByTime(position);
 
     } else {
       container.style.display = 'none';
@@ -409,6 +486,8 @@ async function update() {
       currentTrack  = '';
       currentArtist = '';
       lyricsLines   = [];
+      lyricsSynced  = false;
+      isPlaying     = false;
     }
   } catch (e) {
     // silently retry
