@@ -222,6 +222,8 @@
   <div class="msg">Waiting for music…</div>
 </div>
 
+<div id="debug" style="position:fixed;top:0;left:0;background:rgba(0,0,0,0.85);color:#0f0;font:14px monospace;padding:10px;white-space:pre;z-index:99;display:none;border-bottom-right-radius:8px"></div>
+
 <script>
 const params = new URLSearchParams(window.location.search);
 const HA    = params.get('ha')    || 'http://192.168.1.220:8123';
@@ -231,6 +233,8 @@ const SPOTIFY_ENTITY  = 'media_player.spotifyplus_chelsea';
 // Seconds to nudge lyrics earlier, compensating for lrclib timestamps
 // running slightly late. Override per-URL with ?lead=1.5
 const LYRIC_LEAD = params.has('lead') ? parseFloat(params.get('lead')) : 1.0;
+// Add ?debug=1 to the URL to show a live readout in the top-left corner.
+const DEBUG = params.has('debug');
 
 const container    = document.getElementById('container');
 const idle         = document.getElementById('idle');
@@ -251,6 +255,10 @@ let activeIdx      = -1;
 
 // Live playback position tracking (refreshed each poll, advanced by ticker)
 let posBase = 0, posUpdatedAtMs = 0, isPlaying = false;
+let lastEntity = '', lastState = '';
+
+const debugEl = document.getElementById('debug');
+if (DEBUG && debugEl) debugEl.style.display = 'block';
 
 async function fetchState(entity) {
   const res = await fetch(`${HA}/api/states/${entity}`, {
@@ -362,23 +370,40 @@ function currentPosition() {
 
 // Smooth highlight ticker — advances the active line between polls so the
 // highlight glides with the music instead of jumping every 3 seconds.
-setInterval(function () { updateActiveLineByTime(currentPosition()); }, 200);
+setInterval(function () {
+  const pos = currentPosition();
+  updateActiveLineByTime(pos);
+  if (DEBUG && debugEl) {
+    const first = lyricsLines.length ? lyricsLines[0].time : '-';
+    const last = lyricsLines.length ? lyricsLines[lyricsLines.length - 1].time.toFixed(1) : '-';
+    debugEl.textContent =
+      `entity:   ${lastEntity}\n` +
+      `state:    ${lastState}  playing:${isPlaying}\n` +
+      `posBase:  ${posBase.toFixed(1)}\n` +
+      `position: ${pos.toFixed(1)}\n` +
+      `synced:   ${lyricsSynced}  lines:${lyricsLines.length}\n` +
+      `activeIdx:${activeIdx}\n` +
+      `lyricTimes: ${first} .. ${last}`;
+  }
+}, 200);
 
 async function update() {
   try {
-    let data = await fetchState(MASS_ENTITY);
+    // Prefer the Spotify entity — it reports an accurate, fresh position.
+    // Fall back to the MASS/Denon entity only if Spotify isn't active.
+    let data = await fetchState(SPOTIFY_ENTITY);
     let attrs = data ? (data.attributes || {}) : {};
-    // Use MASS only if it's actually playing AND reports a position we can
-    // sync to; otherwise fall back to the Spotify entity (reliable position).
-    const massUsable = data && (data.state === 'playing' || data.state === 'paused')
-      && attrs.media_title && attrs.media_position_updated_at != null;
-    if (!massUsable) {
-      const sp = await fetchState(SPOTIFY_ENTITY);
-      if (sp) { data = sp; attrs = sp.attributes || {}; }
+    let usedEntity = SPOTIFY_ENTITY;
+    const spUsable = data && (data.state === 'playing' || data.state === 'paused') && attrs.media_title;
+    if (!spUsable) {
+      const m = await fetchState(MASS_ENTITY);
+      if (m) { data = m; attrs = m.attributes || {}; usedEntity = MASS_ENTITY; }
     }
     if (!data) return;
 
     const state = data.state;
+    lastEntity = usedEntity;
+    lastState = state;
 
     if (state === 'playing' || state === 'paused') {
       container.style.display = 'flex';
