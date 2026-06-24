@@ -10,9 +10,9 @@ them to their pre-sync state (an HA scene snapshot) when playback stops.
 
 Reload after editing:  Developer Tools → Actions → pyscript.reload
 """
-import urllib.request, colorsys
-from io import BytesIO
-from PIL import Image
+# NOTE: PIL / urllib / colorsys are imported *inside* _extract_palette. It runs
+# as a @pyscript_compile native function, and compiled functions can't see the
+# pyscript file's top-level imports — so they must be imported in-scope there.
 
 PLAYER   = "media_player.denon_avr_x4800h_3"
 LIGHTS   = ["light.tv_wall_left", "light.tv_wall_right", "light.77_inch_tv"]
@@ -33,6 +33,9 @@ def _extract_palette(url, n=5):
 
     @pyscript_compile makes this a plain Python function (not a pyscript
     function), which is required to hand it to task.executor."""
+    import urllib.request, colorsys
+    from io import BytesIO
+    from PIL import Image
     raw = urllib.request.urlopen(url, timeout=15).read()
     img = Image.open(BytesIO(raw)).convert("RGB").resize((120, 120))
     q = img.quantize(colors=12, method=Image.MEDIANCUT)
