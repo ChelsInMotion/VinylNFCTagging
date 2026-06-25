@@ -133,10 +133,15 @@
   #lyrics-col::after  { bottom: 0; background: linear-gradient(to top, #0a0a0a, transparent); }
 
   #lyrics-scroll {
-    overflow: hidden;
+    overflow-y: auto;
     height: 100%;
     position: relative;
+    scroll-behavior: smooth;
+    scrollbar-width: none;        /* Firefox */
+    -ms-overflow-style: none;     /* legacy Edge */
   }
+  /* Hide the scrollbar but keep it scrollable (wheel / touch / magic remote). */
+  #lyrics-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
   #lyrics-inner {
     transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
@@ -274,6 +279,10 @@ let lastEntity = '', lastState = '';
 // whether it's usable at all. When unhealthy, lyrics show static (Option C).
 let clockHealthy = true, clockMode = 'direct', clockEntity = '';
 let staticShown = false;
+// Manual scrolling: any wheel/touch pauses auto-follow so you can read liner
+// notes baked into the lyrics; it resumes after you stop (or on track change).
+let userScrolling = false, userScrollTimer = null;
+const RESUME_MS = 15000;
 
 const debugEl = document.getElementById('debug');
 if (DEBUG && debugEl) debugEl.style.display = 'block';
@@ -363,13 +372,10 @@ function renderLyrics(lines, synced) {
 
 function scrollToLine(idx) {
   if (idx < 0 || idx >= lyricEls.length) return;
-  const el = lyricEls[idx];
+  if (userScrolling) return;   // don't fight a manual scroll
   const scrollEl = document.getElementById('lyrics-scroll');
-  const scrollH = scrollEl.offsetHeight;
-  const elTop = el.offsetTop;
-  const elH = el.offsetHeight;
-  const offset = elTop - (scrollH / 2) + (elH / 2) - 40 /* padding-top of inner */;
-  lyricsInner.style.transform = `translateY(${-offset}px)`;
+  const el = lyricEls[idx];
+  scrollEl.scrollTop = el.offsetTop - (scrollEl.clientHeight / 2) + (el.offsetHeight / 2);
 }
 
 function updateActiveLineByTime(positionSec) {
@@ -405,7 +411,7 @@ function showStaticLyrics() {
   staticShown = true;
   activeIdx = -1;
   for (const el of lyricEls) el.className = 'lyric-line plain';
-  lyricsInner.style.transform = 'translateY(0)';
+  document.getElementById('lyrics-scroll').scrollTop = 0;
 }
 
 setInterval(function () {
@@ -535,6 +541,8 @@ async function update() {
         currentArtist = newArtist;
         lyricsSynced  = false;   // pause highlighting during the fetch
         activeIdx     = -1;
+        userScrolling = false;   // new track -> resume auto-follow
+        clearTimeout(userScrollTimer);
 
         if (newTrack && newArtist) {
           const result = await fetchLyrics(newArtist, newTrack, attrs.media_album_name, attrs.media_duration);
@@ -560,6 +568,20 @@ async function update() {
     // silently retry
   }
 }
+
+// Wire up manual scroll detection on the lyrics pane. A wheel/touch gesture
+// pauses auto-follow; programmatic scrolls don't fire these, so they're safe.
+(function () {
+  const scrollEl = document.getElementById('lyrics-scroll');
+  function onUserScroll() {
+    userScrolling = true;
+    clearTimeout(userScrollTimer);
+    userScrollTimer = setTimeout(function () { userScrolling = false; }, RESUME_MS);
+  }
+  ['wheel', 'touchstart', 'touchmove'].forEach(function (ev) {
+    scrollEl.addEventListener(ev, onUserScroll, { passive: true });
+  });
+})();
 
 update();
 setInterval(update, 3000);
