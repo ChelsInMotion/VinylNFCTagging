@@ -1,0 +1,174 @@
+# ============================================================================
+# Household alert automations
+# ----------------------------------------------------------------------------
+# Drop-in Home Assistant "package". It bundles the helpers + automations for:
+#   1. Guest-bathroom baby gate open too long  -> "Bagel is about to eat cat poop"
+#   2. Patio door open 5 min -> turn AC off; once it closes -> turn AC back on
+#   3. R2D2 self-clean red status light -> reset to normal on bin open+close
+#
+# To use packages, make sure your configuration.yaml has:
+#   homeassistant:
+#     packages: !include_dir_named packages
+# ...and put this file in <config>/packages/household_alerts.yaml
+#
+# >>> Replace every entity id tagged "# REPLACE" with your real entity. <<<
+# See ../README.md for the full placeholder list and rename guidance.
+# ============================================================================
+
+# ---- Helpers ---------------------------------------------------------------
+input_boolean:
+  # Set when the patio door has been open >= 5 min and we've told you to kill
+  # the AC. Used so the "turn the AC back on" reminder ONLY fires after a real
+  # 5-minute-open event, not on every quick in-and-out.
+  patio_door_ac_reminder:
+    name: Patio door AC reminder pending
+    icon: mdi:air-conditioner
+
+  # Set while R2D2's self-clean red status light is showing. The reset
+  # automation checks this so a random dustbin removal doesn't fire a reset
+  # when there's nothing to reset.
+  r2d2_self_clean_done:
+    name: R2D2 self-clean red light active
+    icon: mdi:robot-vacuum
+
+# ---- Automations -----------------------------------------------------------
+automation:
+
+  # 1) BABY GATE -------------------------------------------------------------
+  - alias: "Baby gate open 30s - Bagel cat poop alert"
+    id: baby_gate_open_bagel_alert
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.guest_bathroom_baby_gate   # REPLACE
+        to: "on"        # contact/opening sensors report "on" = open
+        for:
+          seconds: 30
+    action:
+      - service: notify.mobile_app_chelsea_phone            # REPLACE
+        data:
+          title: "🚽 Guest bathroom gate"
+          message: "Bagel is about to eat cat poop"
+      - service: tts.speak
+        target:
+          entity_id: tts.google_translate_en_com            # REPLACE (your TTS entity)
+        data:
+          media_player_entity_id: media_player.google_home  # REPLACE (one or more)
+          message: >-
+            Heads up. The guest bathroom baby gate is open.
+            Bagel is about to eat cat poop.
+
+  # 2a) PATIO DOOR OPEN 5 MIN -> TURN AC OFF ---------------------------------
+  - alias: "Patio door open 5 min - turn off AC"
+    id: patio_door_open_ac_off
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.patio_door                 # REPLACE
+        to: "on"
+        for:
+          minutes: 5
+    action:
+      # Mark that we owe you a "turn it back on" reminder when it closes.
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.patio_door_ac_reminder
+      - service: notify.mobile_app_chelsea_phone            # REPLACE
+        data:
+          title: "🌡️ Patio door open"
+          message: "It's been open 5 minutes — turn off the AC."
+      - service: tts.speak
+        target:
+          entity_id: tts.google_translate_en_com            # REPLACE
+        data:
+          media_player_entity_id: media_player.google_home  # REPLACE
+          message: >-
+            The patio door has been open for five minutes.
+            Don't forget to turn off the A C.
+
+  # 2b) PATIO DOOR CLOSES (after the 5-min event) -> TURN AC BACK ON ---------
+  - alias: "Patio door closed - turn AC back on"
+    id: patio_door_closed_ac_on
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.patio_door                 # REPLACE
+        to: "off"
+    condition:
+      # Only remind if the door had actually been open long enough to make us
+      # tell you to turn the AC off in the first place.
+      - condition: state
+        entity_id: input_boolean.patio_door_ac_reminder
+        state: "on"
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.patio_door_ac_reminder
+      - service: notify.mobile_app_chelsea_phone            # REPLACE
+        data:
+          title: "🌡️ Patio door closed"
+          message: "Patio's shut — you can turn the AC back on."
+      - service: tts.speak
+        target:
+          entity_id: tts.google_translate_en_com            # REPLACE
+        data:
+          media_player_entity_id: media_player.google_home  # REPLACE
+          message: >-
+            The patio door is closed. You can turn the A C back on.
+
+  # 3a) R2D2 SELF-CLEAN DONE -> RED STATUS LIGHT -----------------------------
+  #     RECONSTRUCTED WRAPPER. This mirrors what your existing "self-clean ->
+  #     red light" routine likely does so the reset (3b) has something to undo.
+  #     Replace the trigger + light target below with your real ones, or drop
+  #     this block entirely and just keep 3b if your routine already sets
+  #     input_boolean.r2d2_self_clean_done itself.
+  - alias: "R2D2 self-clean done - red status light"
+    id: r2d2_self_clean_red_light
+    mode: single
+    trigger:
+      # EXAMPLE trigger — replace with whatever signals self-clean complete
+      # (a vacuum state change, an attribute, or an event from your routine).
+      - platform: state
+        entity_id: vacuum.r2d2                               # REPLACE
+        attribute: status
+        to: "self-clean complete"                            # REPLACE to match your integration
+    action:
+      # Snapshot the current light state so we can restore it exactly later.
+      - service: scene.create
+        data:
+          scene_id: r2d2_pre_clean_lights
+          snapshot_entities:
+            - light.r2d2_status_light                        # REPLACE
+      - service: light.turn_on
+        target:
+          entity_id: light.r2d2_status_light                 # REPLACE
+        data:
+          rgb_color: [255, 0, 0]
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.r2d2_self_clean_done
+
+  # 3b) R2D2 CONTACT OPENED THEN CLOSED -> RESET LIGHTS TO NORMAL ------------
+  #     This is the new behavior you asked for: when the vacuum contact sensor
+  #     is opened and then closed, reset the lights back to normal.
+  - alias: "R2D2 contact opened then closed - reset lights to normal"
+    id: r2d2_contact_reset_lights
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.r2d2_dustbin_contact        # REPLACE (see rename note in README)
+        from: "on"      # was open
+        to: "off"       # ...now closed -> the "opened then closed" gesture
+    condition:
+      # Only reset if the red status light is actually showing.
+      - condition: state
+        entity_id: input_boolean.r2d2_self_clean_done
+        state: "on"
+    action:
+      # Restore the exact pre-red-light state captured in 3a.
+      - service: scene.turn_on
+        target:
+          entity_id: scene.r2d2_pre_clean_lights
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.r2d2_self_clean_done
