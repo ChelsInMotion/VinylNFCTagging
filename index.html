@@ -2,402 +2,372 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Now Playing</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    min-height: 100vh;
-    background: #0a0a0a;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: Georgia, serif;
+  :root{
+    --bg:#0a0a0a; --accent:#c0392b; --glow:rgba(192,57,43,.33);
+    --ink:#f0ece4; --dim:#9a9a9a; --kick:#8c8c8c;
   }
-  .container {
-    text-align: center;
-    padding: 2rem;
-    max-width: 480px;
-    width: 100%;
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:Georgia,'Times New Roman',serif;
+    display:flex;align-items:center;justify-content:center;
+    position:relative;-webkit-font-smoothing:antialiased;
   }
-
-  /* Now playing styles */
-  .label {
-    font-family: monospace;
-    font-size: 11px;
-    letter-spacing: 0.2em;
-    color: #c0392b;
-    text-transform: uppercase;
-    margin-bottom: 2.5rem;
+  #amb{
+    position:fixed;inset:-20%;background-size:cover;background-position:center;
+    filter:blur(60px) saturate(1.3);opacity:0;transition:opacity 1.2s ease;
+    z-index:0;pointer-events:none;
   }
-  .vinyl-wrap {
-    position: relative;
-    width: 240px;
-    height: 240px;
-    margin: 0 auto 2.5rem;
+  .stage{
+    position:relative;z-index:1;display:flex;gap:clamp(16px,4vw,48px);
+    align-items:center;justify-content:center;
+    width:100%;height:100%;padding:clamp(14px,4vmin,36px);
+    flex-direction:column;
   }
-  .vinyl {
-    width: 240px;
-    height: 240px;
-    animation: spin 8s linear infinite;
-    will-change: transform;
-    -webkit-animation: spin 8s linear infinite;
+  .discbox{
+    position:relative;flex:0 0 auto;
+    width:clamp(150px,42vmin,300px);height:clamp(150px,42vmin,300px);
   }
-  .tonearm {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 240px;
-    height: 240px;
-    pointer-events: none;
+  .spinner{
+    position:absolute;inset:6%;border-radius:50%;
   }
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+  .spinning{animation:spin 1.8s linear infinite;will-change:transform}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .record{width:100%;height:100%;display:block}
+  .labelart{
+    position:absolute;left:50%;top:50%;width:30%;height:30%;
+    transform:translate(-50%,-50%);border-radius:50%;
+    object-fit:cover;display:none;
   }
-  @-webkit-keyframes spin {
-    from { -webkit-transform: rotate(0deg); }
-    to { -webkit-transform: rotate(360deg); }
+  .ringsvg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;transform:rotate(-90deg)}
+  .ringfg{
+    fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round;
+    opacity:0;transition:stroke-dashoffset .25s linear;
   }
-  .artist {
-    font-family: monospace;
-    font-size: 12px;
-    letter-spacing: 0.15em;
-    color: #666;
-    text-transform: uppercase;
-    margin-bottom: 0.75rem;
+  .armsvg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden}
+  .arm{
+    transform-origin:86% 14%;
+    transform:rotate(-26deg);
+    transition:transform .9s cubic-bezier(.4,.1,.3,1);
   }
-  .album {
-    font-size: 1.8rem;
-    color: #f0ece4;
-    line-height: 1.15;
-    margin-bottom: 2.5rem;
+  .info{
+    display:flex;flex-direction:column;align-items:center;text-align:center;
+    max-width:min(92vw,440px);
   }
-  .divider {
-    width: 40px;
-    height: 1px;
-    background: #222;
-    margin: 0 auto 2rem;
+  .artist{
+    font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:clamp(10px,2.6vmin,13px);letter-spacing:.18em;
+    color:var(--kick);text-transform:uppercase;margin-bottom:.5rem;
   }
-  .status {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-family: monospace;
-    font-size: 11px;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: #444;
+  .album{
+    font-size:clamp(1.3rem,5.4vmin,2.1rem);line-height:1.1;
+    color:var(--ink);font-weight:400;
   }
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #c0392b;
-    animation: blink 1.4s ease-in-out infinite;
+  .track{
+    font-style:italic;font-size:clamp(.95rem,3.2vmin,1.2rem);
+    color:var(--dim);margin-top:.45rem;
   }
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.2; }
+  .clock{
+    font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:clamp(11px,2.6vmin,13px);letter-spacing:.12em;
+    color:var(--dim);margin-top:.9rem;
   }
-
-  /* Lyrics */
-  .lyrics {
-    margin-top: 2.5rem;
-    max-height: 230px;
-    overflow: hidden;
-    position: relative;
-    font-family: Georgia, serif;
-    font-size: 1.1rem;
-    line-height: 2;
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 78%, transparent 100%);
-    mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 78%, transparent 100%);
+  .lyrics{
+    position:relative;margin-top:1.2rem;width:100%;
+    height:clamp(96px,26vmin,190px);overflow:hidden;
+    -webkit-mask-image:linear-gradient(180deg,transparent,#000 22%,#000 78%,transparent);
+            mask-image:linear-gradient(180deg,transparent,#000 22%,#000 78%,transparent);
   }
-  .lyrics-inner {
-    transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1);
-    will-change: transform;
+  .lyrics-inner{
+    position:absolute;left:0;right:0;top:50%;
+    transition:transform .45s cubic-bezier(.4,.1,.3,1);
   }
-  .lyric-line {
-    color: #8a8a8a;
-    opacity: 0.65;
-    transition: color 0.35s ease, opacity 0.35s ease;
-    padding: 0 0.5rem;
+  .lyrics.plain .lyrics-inner{top:0;transition:none}
+  .line{
+    font-size:21px;line-height:1.5;color:var(--dim);
+    padding:.1rem .4rem;transition:font-size .4s ease,color .4s ease,opacity .4s ease;
+    opacity:.75;
   }
-  .lyric-line.passed {
-    color: #5a5a5a;
-    opacity: 0.4;
+  .line.active{font-size:30px;color:var(--ink);opacity:1}
+  /* error state */
+  .no .ringsvg,.no .arm{}
+  .no-record .label-fallback{fill:#2b2b2b}
+  .noword{
+    font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:clamp(11px,3vmin,14px);letter-spacing:.22em;
+    color:#6a6a6a;text-transform:uppercase;margin-top:.4rem;
   }
-  .lyric-line.active {
-    color: #f0ece4;
-    opacity: 1;
+  /* landscape: two real columns */
+  @media (orientation:landscape){
+    .stage{flex-direction:row;align-items:center}
+    .discbox{width:clamp(150px,70vmin,340px);height:clamp(150px,70vmin,340px)}
+    .info{align-items:flex-start;text-align:left;max-width:min(52vw,460px)}
+    .lyrics{height:clamp(110px,62vmin,260px)}
   }
-  /* Plain (un-timed) lyrics: readable, no highlighting */
-  .lyrics.static .lyric-line {
-    color: #d8d2c8;
-    opacity: 1;
-  }
-
-  /* Error styles */
-  .error-img {
-    width: 100%;
-    max-width: 400px;
-    border-radius: 8px;
+  @media (prefers-reduced-motion:reduce){
+    .spinning{animation:none!important}
+    .arm{transition:none!important}
+    .ringfg{transition:none!important}
+    .lyrics-inner,.line{transition:none!important}
+    #amb{transition:none!important}
   }
 </style>
 </head>
 <body>
-<div class="container" id="now-playing" style="display:none">
-  <div class="label">Now playing on Denon AVR-X4800H</div>
-  <div class="vinyl-wrap">
-    <!-- Spinning record -->
-    <svg class="vinyl" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <radialGradient id="shimmer" cx="35%" cy="30%" r="65%">
-          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.08"/>
-          <stop offset="50%" stop-color="#ffffff" stop-opacity="0"/>
-          <stop offset="100%" stop-color="#000000" stop-opacity="0.15"/>
-        </radialGradient>
-        <clipPath id="label-clip">
-          <circle cx="80" cy="80" r="24"/>
-        </clipPath>
-      </defs>
-      <!-- Record base -->
-      <circle cx="80" cy="80" r="78" fill="#1a1a1a" stroke="#333" stroke-width="1.5"/>
-      <!-- Grooves — more contrast -->
-      <circle cx="80" cy="80" r="72" fill="none" stroke="#2a2a2a" stroke-width="1.5"/>
-      <circle cx="80" cy="80" r="66" fill="none" stroke="#262626" stroke-width="1"/>
-      <circle cx="80" cy="80" r="60" fill="none" stroke="#2a2a2a" stroke-width="1.5"/>
-      <circle cx="80" cy="80" r="54" fill="none" stroke="#262626" stroke-width="1"/>
-      <circle cx="80" cy="80" r="48" fill="none" stroke="#2a2a2a" stroke-width="1.5"/>
-      <circle cx="80" cy="80" r="42" fill="none" stroke="#262626" stroke-width="1"/>
-      <circle cx="80" cy="80" r="36" fill="none" stroke="#2a2a2a" stroke-width="1.5"/>
-      <circle cx="80" cy="80" r="30" fill="none" stroke="#333" stroke-width="1"/>
-      <!-- Label (red fallback, replaced by album art if provided) -->
-      <circle cx="80" cy="80" r="24" fill="#c0392b" id="label-bg"/>
-      <image id="label-art" x="56" y="56" width="48" height="48" clip-path="url(#label-clip)" preserveAspectRatio="xMidYMid slice" style="display:none"/>
-      <circle cx="80" cy="80" r="5" fill="#0a0a0a"/>
-      <!-- Shimmer highlight -->
-      <circle cx="80" cy="80" r="78" fill="url(#shimmer)"/>
+<div id="amb"></div>
+<div class="stage" id="stage">
+  <div class="discbox" id="discbox">
+    <div class="spinner" id="spinner">
+      <svg class="record" viewBox="0 0 160 160" aria-hidden="true">
+        <defs>
+          <radialGradient id="sh" cx="35%" cy="30%" r="70%">
+            <stop offset="0%" stop-color="#fff" stop-opacity=".07"/>
+            <stop offset="55%" stop-color="#fff" stop-opacity="0"/>
+            <stop offset="100%" stop-color="#000" stop-opacity=".18"/>
+          </radialGradient>
+        </defs>
+        <circle cx="80" cy="80" r="79" fill="#141414" stroke="#333" stroke-width="1"/>
+        <circle cx="80" cy="80" r="72" fill="none" stroke="#242424" stroke-width="1.4"/>
+        <circle cx="80" cy="80" r="65" fill="none" stroke="#1f1f1f" stroke-width="1"/>
+        <circle cx="80" cy="80" r="58" fill="none" stroke="#242424" stroke-width="1.4"/>
+        <circle cx="80" cy="80" r="51" fill="none" stroke="#1f1f1f" stroke-width="1"/>
+        <circle cx="80" cy="80" r="44" fill="none" stroke="#242424" stroke-width="1.4"/>
+        <circle cx="80" cy="80" r="37" fill="none" stroke="#1f1f1f" stroke-width="1"/>
+        <circle cx="80" cy="80" r="30" fill="none" stroke="#2c2c2c" stroke-width="1"/>
+        <circle class="label-fallback" id="labelbg" cx="80" cy="80" r="24" fill="var(--accent)"/>
+        <circle cx="80" cy="80" r="3.4" fill="#0a0a0a"/>
+        <circle cx="80" cy="80" r="79" fill="url(#sh)"/>
+      </svg>
+      <img class="labelart" id="labelart" alt="">
+    </div>
+    <svg class="ringsvg" viewBox="0 0 160 160" aria-hidden="true">
+      <circle class="ringfg" id="ring" cx="80" cy="80" r="76"/>
     </svg>
-    <!-- Tonearm (static, sits on top) -->
-    <svg class="tonearm" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
-      <!-- Pivot point -->
-      <circle cx="138" cy="22" r="5" fill="#888" stroke="#555" stroke-width="1"/>
-      <!-- Arm -->
-      <line x1="138" y1="22" x2="105" y2="72" stroke="#999" stroke-width="2.5" stroke-linecap="round"/>
-      <!-- Headshell angle -->
-      <line x1="105" y1="72" x2="95" y2="82" stroke="#888" stroke-width="2" stroke-linecap="round"/>
-      <!-- Stylus tip -->
-      <circle cx="94" cy="83" r="2" fill="#c0392b"/>
+    <svg class="armsvg" viewBox="0 0 160 160" aria-hidden="true">
+      <g class="arm" id="arm">
+        <circle cx="138" cy="22" r="6" fill="#8a8a8a" stroke="#555" stroke-width="1"/>
+        <circle cx="138" cy="22" r="2.4" fill="#444"/>
+        <line x1="138" y1="22" x2="104" y2="70" stroke="#9a9a9a" stroke-width="2.6" stroke-linecap="round"/>
+        <line x1="104" y1="70" x2="93" y2="81" stroke="#8a8a8a" stroke-width="2.2" stroke-linecap="round"/>
+        <rect x="88" y="78" width="9" height="7" rx="1.5" transform="rotate(42 92 81)" fill="#777"/>
+        <circle cx="92" cy="83" r="2" fill="var(--accent)"/>
+      </g>
     </svg>
   </div>
-  <div class="artist" id="artist"></div>
-  <div class="album" id="album"></div>
-  <div class="divider"></div>
-  <div class="status">
-    <div class="dot"></div>
-    Playing now
-  </div>
-  <div class="lyrics" id="lyrics" style="display:none">
-    <div class="lyrics-inner" id="lyrics-inner"></div>
+  <div class="info" id="info">
+    <div class="artist" id="o-artist"></div>
+    <div class="album" id="o-album"></div>
+    <div class="track" id="o-track" style="display:none"></div>
+    <div class="clock" id="o-clock" style="display:none"></div>
+    <div class="lyrics" id="o-lyrics" style="display:none"><div class="lyrics-inner" id="o-lyrics-inner"></div></div>
+    <div class="noword" id="o-noword" style="display:none">No record</div>
   </div>
 </div>
-
-<div class="container" id="error" style="display:none">
-  <img class="error-img" src="error.jpg" alt="Technical Difficulties — Please Stand By">
-</div>
-
 <script>
-  var pageLoadTime = performance.now ? performance.now() : 0;
+(function(){
+  "use strict";
+  var P=new URLSearchParams(location.search);
+  var artist=P.get('artist'), album=P.get('album'), track=P.get('track'),
+      webhook=P.get('webhook'), art=P.get('art'), lyricsParam=P.get('lyrics');
+  var durRaw=parseFloat(P.get('dur')), tRaw=parseFloat(P.get('t'));
+  var dur=(isFinite(durRaw)&&durRaw>0)?durRaw:null;
+  var tOff=(isFinite(tRaw)&&tRaw>=0)?tRaw:0;
 
-  document.addEventListener('visibilitychange', function() {
-    if (!document.hidden) {
-      var vinyl = document.querySelector('.vinyl');
-      if (vinyl) {
-        vinyl.style.animation = 'none';
-        vinyl.offsetHeight; // force reflow
-        vinyl.style.animation = '';
+  // --- webhook: scheduled FIRST, before any rendering work ---
+  if(webhook && artist && album){
+    setTimeout(function(){
+      try{ fetch('https://hooks.nabu.casa/'+webhook,{method:'POST',mode:'no-cors'}).catch(function(){}); }catch(e){}
+    },500);
+  }
+
+  var $=function(id){return document.getElementById(id);};
+
+  // --- error state: artist OR album missing ---
+  if(!artist || !album){
+    document.body.classList.add('no-record');
+    $('spinner').classList.remove('spinning');
+    $('o-noword').style.display='';
+    $('arm').style.transform='rotate(-26deg)';
+    return; // no lyrics fetch, no travel, no webhook (already gated above)
+  }
+
+  // --- identity ---
+  $('o-artist').textContent=artist;
+  $('o-album').textContent=album;
+  if(track){ $('o-track').textContent=track; $('o-track').style.display=''; }
+
+  // --- clock ---
+  var clockEl=$('o-clock');
+  function mmss(s){ s=Math.max(0,Math.floor(s)); return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2); }
+
+  // --- art: ONE load, crossOrigin anon, sample once, tint, blurred ambience ---
+  if(art){
+    var im=new Image();
+    im.crossOrigin='anonymous';
+    im.onload=function(){
+      var la=$('labelart');
+      la.src=im.src; la.style.display='';
+      $('labelbg').style.display='none';
+      try{
+        var c=document.createElement('canvas'),n=24;
+        c.width=n;c.height=n;
+        var x=c.getContext('2d');
+        x.drawImage(im,0,0,n,n);
+        var d=x.getImageData(0,0,n,n).data,r=0,g=0,b=0,k=0;
+        for(var i=0;i<d.length;i+=4){ if(d[i+3]<128)continue; r+=d[i];g+=d[i+1];b+=d[i+2];k++; }
+        if(k){
+          r=Math.round(r/k);g=Math.round(g/k);b=Math.round(b/k);
+          var lum=0.2126*r+0.7152*g+0.0722*b;
+          if(lum<60){ var f=1+(60-lum)/90; r=Math.min(255,r*f);g=Math.min(255,g*f);b=Math.min(255,b*f); }
+          var rgb=Math.round(r)+','+Math.round(g)+','+Math.round(b);
+          var rs=document.documentElement.style;
+          rs.setProperty('--accent','rgb('+rgb+')');
+          rs.setProperty('--glow','rgba('+rgb+',.33)');
+          try{ $('amb').style.backgroundImage='url('+c.toDataURL()+')'; $('amb').style.opacity='.4'; }catch(e2){}
+        }
+      }catch(e){/* taint: keep red default, art still shown */}
+    };
+    im.onerror=function(){/* keep red label */};
+    im.src=art;
+  }
+
+  // --- lyrics plumbing ---
+  var lyricsBox=$('o-lyrics'), lyricsInner=$('o-lyrics-inner');
+  var synced=null; // array of {time,text} OR null
+  var lineEls=[];
+
+  function renderPlain(lines){
+    lyricsBox.classList.add('plain');
+    lyricsInner.innerHTML='';
+    lines.forEach(function(t){ var el=document.createElement('div'); el.className='line'; el.textContent=t; lyricsInner.appendChild(el); });
+    lyricsBox.style.display='';
+  }
+  function renderSynced(arr){
+    synced=arr;
+    lyricsInner.innerHTML=''; lineEls=[];
+    arr.forEach(function(o){ var el=document.createElement('div'); el.className='line'; el.textContent=o.text||'\u266a'; lyricsInner.appendChild(el); lineEls.push(el); });
+    lyricsBox.style.display='';
+  }
+  function parseLRC(txt){
+    var out=[], lines=txt.split(/\r?\n/), re=/\[(\d+):(\d+(?:\.\d+)?)\]/g;
+    for(var i=0;i<lines.length;i++){
+      var raw=lines[i], m, times=[]; re.lastIndex=0;
+      while((m=re.exec(raw))){ times.push(parseInt(m[1],10)*60+parseFloat(m[2])); }
+      if(times.length){
+        var text=raw.replace(re,'').trim();
+        for(var j=0;j<times.length;j++) out.push({time:times[j],text:text});
       }
     }
-  });
-
-  // Parse LRC-style timestamped lyrics. Returns array of {time, text}.
-  // Lines look like "[01:23.45]some words" (centiseconds optional).
-  // Returns null if no timestamps are found (plain lyrics).
-  function parseLRC(raw) {
-    var lines = raw.replace(/\r/g, '').split('\n');
-    var out = [];
-    var re = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      var stamps = [];
-      var m;
-      re.lastIndex = 0;
-      while ((m = re.exec(line)) !== null) {
-        var min = parseInt(m[1], 10);
-        var sec = parseInt(m[2], 10);
-        var frac = m[3] ? parseFloat('0.' + m[3]) : 0;
-        stamps.push(min * 60 + sec + frac);
-      }
-      var text = line.replace(re, '').trim();
-      for (var s = 0; s < stamps.length; s++) {
-        out.push({ time: stamps[s], text: text });
-      }
-    }
-    if (!out.length) return null;
-    out.sort(function(a, b) { return a.time - b.time; });
+    out.sort(function(a,b){return a.time-b.time;});
     return out;
   }
-
-  function setupLyrics(raw, startAt) {
-    var box = document.getElementById('lyrics');
-    var inner = document.getElementById('lyrics-inner');
-    box.style.display = 'block';
-
-    var timed = parseLRC(raw);
-
-    if (!timed) {
-      // Plain lyrics — display them cleanly, no syncing possible.
-      box.classList.add('static');
-      var plain = raw.replace(/\r/g, '').split('\n');
-      for (var i = 0; i < plain.length; i++) {
-        var d = document.createElement('div');
-        d.className = 'lyric-line';
-        d.textContent = plain[i].trim() || ' ';
-        inner.appendChild(d);
-      }
-      return;
-    }
-
-    // Timed lyrics — build elements and sync to elapsed playback time.
-    var els = [];
-    for (var j = 0; j < timed.length; j++) {
-      var el = document.createElement('div');
-      el.className = 'lyric-line';
-      el.textContent = timed[j].text || ' ';
-      inner.appendChild(el);
-      els.push(el);
-    }
-
-    var t0 = (window.performance && performance.now) ? performance.now() : Date.now();
-    var current = -1;
-
-    function tick() {
-      var now = (window.performance && performance.now) ? performance.now() : Date.now();
-      var elapsed = (now - t0) / 1000 + startAt;
-
-      // Find the last line whose timestamp has passed.
-      var idx = -1;
-      for (var k = 0; k < timed.length; k++) {
-        if (timed[k].time <= elapsed) idx = k; else break;
-      }
-
-      if (idx !== current) {
-        current = idx;
-        for (var n = 0; n < els.length; n++) {
-          els[n].className = 'lyric-line' +
-            (n < idx ? ' passed' : (n === idx ? ' active' : ''));
-        }
-        // Center the active line within the lyrics window.
-        if (idx >= 0) {
-          var active = els[idx];
-          var offset = box.clientHeight / 2 - (active.offsetTop + active.offsetHeight / 2);
-          inner.style.transform = 'translateY(' + offset + 'px)';
-        }
-      }
-      requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
+  function hasLrcStamps(txt){ return /\[\d+:\d+(?:\.\d+)?\]/.test(txt); }
+  function ingest(txt){
+    if(!txt) return false;
+    if(hasLrcStamps(txt)){ var a=parseLRC(txt); if(a.length){ renderSynced(a); return true; } }
+    var plain=txt.split(/\r?\n/).map(function(s){return s.trim();}).filter(Boolean);
+    if(plain.length){ renderPlain(plain); return true; }
+    return false;
   }
 
-  var params = new URLSearchParams(window.location.search);
-  var artist = params.get('artist');
-  var album = params.get('album');
-  var track = params.get('track');   // song title (for lyrics lookup)
-  var dur = parseFloat(params.get('dur')) || 0;
-  var webhook = params.get('webhook');
-  var art = params.get('art');
-  var lyrics = params.get('lyrics');
-  var startAt = parseFloat(params.get('t')) || 0;
-
-  if (artist && album) {
-    document.getElementById('artist').textContent = artist;
-    document.getElementById('album').textContent = album;
-    document.getElementById('now-playing').style.display = 'block';
-
-    if (art) {
-      var labelArt = document.getElementById('label-art');
-      var labelBg = document.getElementById('label-bg');
-      labelArt.setAttribute('href', art);
-      labelArt.style.display = '';
-      labelBg.style.display = 'none';
-    }
-
-    if (lyrics) {
-      // Manual override (lyrics= param still works as a fallback).
-      setupLyrics(lyrics, startAt);
-    } else if (track) {
-      // Fetch synced lyrics from lrclib.net directly in the browser.
-      // This keeps the HA URL short (no encoded lyrics), and lets us
-      // compensate for the time spent loading + fetching.
-      var getUrl = 'https://lrclib.net/api/get' +
-        '?artist_name=' + encodeURIComponent(artist || '') +
-        '&track_name=' + encodeURIComponent(track) +
-        (album ? '&album_name=' + encodeURIComponent(album) : '') +
-        (dur ? '&duration=' + Math.round(dur) : '');
-      var searchUrl = 'https://lrclib.net/api/search' +
-        '?artist_name=' + encodeURIComponent(artist || '') +
-        '&track_name=' + encodeURIComponent(track);
-
-      // Add time elapsed since page load so lyrics land in sync.
-      function showLyrics(lrc) {
-        if (!lrc) return;
-        var elapsed = startAt + ((performance.now ? performance.now() : pageLoadTime) - pageLoadTime) / 1000;
-        setupLyrics(lrc, elapsed);
+  // --- lrclib fetch (only if no inline lyrics AND track present) ---
+  function sleep(ms){ return new Promise(function(r){setTimeout(r,ms);}); }
+  function getWithRetry(url){
+    return fetch(url).then(function(r){
+      if(r.status===429||r.status>=500){
+        var ra=parseFloat(r.headers.get('Retry-After')); if(!isFinite(ra)||ra<0)ra=1; ra=Math.min(ra,4);
+        return sleep(ra*1000).then(function(){return fetch(url);});
       }
-
-      // Pick the best entry from a search result list (prefer synced).
-      function pickFromList(list) {
-        if (!list || !list.length) return null;
-        for (var i = 0; i < list.length; i++) {
-          if (list[i].syncedLyrics) return list[i].syncedLyrics;
-        }
-        for (var j = 0; j < list.length; j++) {
-          if (list[j].plainLyrics) return list[j].plainLyrics;
-        }
-        return null;
-      }
-
-      // Try the exact-match endpoint first; if it misses, fall back to
-      // the fuzzy search endpoint (forgiving of album/duration mismatch).
-      fetch(getUrl)
-        .then(function(r) { return r.ok ? r.json() : null; })
-        .then(function(data) {
-          if (data && (data.syncedLyrics || data.plainLyrics)) {
-            showLyrics(data.syncedLyrics || data.plainLyrics);
-            return;
-          }
-          return fetch(searchUrl)
-            .then(function(r) { return r.ok ? r.json() : null; })
-            .then(function(list) { showLyrics(pickFromList(list)); });
-        })
-        .catch(function() {});
-    }
-
-    // Optionally fire a webhook on load (only if one was supplied).
-    if (webhook) {
-      window.addEventListener('load', function() {
-        setTimeout(function() {
-          fetch('https://hooks.nabu.casa/' + webhook, {
-            method: 'POST',
-            mode: 'no-cors'
-          }).catch(function() {});
-        }, 500);
+      return r;
+    });
+  }
+  function q(o){ return Object.keys(o).filter(function(k){return o[k]!=null&&o[k]!=='';}).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(o[k]);}).join('&'); }
+  function pickBest(list){
+    if(!list||!list.length) return null;
+    var best=null,bs=-1;
+    list.forEach(function(it){
+      var s=0; if(it.syncedLyrics) s+=1000;
+      if(dur!=null && typeof it.duration==='number') s-=Math.min(999,Math.abs(it.duration-dur));
+      if(s>bs){bs=s;best=it;}
+    });
+    return best;
+  }
+  function fetchLyrics(){
+    var getUrl='https://lrclib.net/api/get?'+q({artist_name:artist,track_name:track,album_name:album,duration:dur!=null?Math.round(dur):null});
+    getWithRetry(getUrl).then(function(r){
+      if(r.ok) return r.json();
+      return null;
+    }).then(function(j){
+      if(j&&(j.syncedLyrics||j.plainLyrics)){ ingest(j.syncedLyrics||j.plainLyrics); return; }
+      var sUrl='https://lrclib.net/api/search?'+q({track_name:track,artist_name:artist});
+      return getWithRetry(sUrl).then(function(r){ return r.ok?r.json():null; }).then(function(list){
+        var b=pickBest(list);
+        if(b) ingest(b.syncedLyrics||b.plainLyrics);
       });
-    }
-  } else {
-    document.getElementById('error').style.display = 'block';
+    }).catch(function(){});
   }
+
+  if(lyricsParam){ ingest(lyricsParam); }      // inline lyrics short-circuit everything (authoritative)
+  else if(track){ fetchLyrics(); }
+
+  // --- playback clock / ring / arm / lyric sync ---
+  var t0=performance.now();
+  function elapsed(){ var e=tOff+(performance.now()-t0)/1000; return dur!=null?Math.min(e,dur):e; }
+
+  var ring=$('ring'), C=2*Math.PI*76;
+  ring.setAttribute('stroke-dasharray',C.toFixed(2));
+  var ringOn=(dur!=null);
+  if(ringOn){ ring.style.opacity='1'; ring.setAttribute('stroke-dashoffset',C.toFixed(2)); }
+
+  var reduce=window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var ARM_PARK=-26, ARM_START=-11, ARM_END=4; // degrees
+  function setArm(deg){ $('arm').style.transform='rotate('+deg+'deg)'; }
+
+  // start spin (unless reduced motion)
+  if(!reduce) $('spinner').classList.add('spinning');
+
+  // needle drop AFTER webhook fires (~500ms); then begin tracking
+  var dropDelay=(webhook&&artist&&album)?650:120;
+  setTimeout(function(){ setArm(ARM_START); }, reduce?0:dropDelay);
+
+  var ended=false;
+  function frame(){
+    var e=elapsed();
+    // clock text
+    if(dur!=null){ clockEl.textContent=mmss(e)+' / '+mmss(dur); }
+    else{ clockEl.textContent=mmss(e); }
+    clockEl.style.display='';
+    // ring + arm travel (only with valid dur; snapped/static under reduced motion)
+    if(dur!=null){
+      var p=Math.max(0,Math.min(1,e/dur));
+      if(!reduce){
+        ring.setAttribute('stroke-dashoffset',(C*(1-p)).toFixed(2));
+        setArm(ARM_START+(ARM_END-ARM_START)*p);
+      }
+      if(p>=1 && !ended){
+        ended=true;
+        $('spinner').classList.remove('spinning'); // record pauses
+        setArm(ARM_PARK);                            // arm lifts — no text
+      }
+    }
+    // lyric sync (synced only; plain stays static)
+    if(synced){
+      var idx=-1;
+      for(var i=0;i<synced.length;i++){ if(synced[i].time<=e) idx=i; else break; }
+      for(var k=0;k<lineEls.length;k++) lineEls[k].classList.toggle('active',k===idx);
+      if(idx>=0 && lineEls[idx]){
+        var off=lineEls[idx].offsetTop+lineEls[idx].offsetHeight/2;
+        lyricsInner.style.transform='translateY(-'+off+'px)'; // translate-centred window, NO scrollIntoView
+      }
+    }
+    if(!ended) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
 </script>
 </body>
 </html>
