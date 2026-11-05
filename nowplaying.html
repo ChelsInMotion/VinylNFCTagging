@@ -3,588 +3,669 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Now Playing</title>
+<title>Vinyl</title>
 <style>
+  /* THE SLEEVE, merged. Left rail: art, sleeve-back, side tracklist, needle.
+     Right: title headline + lyrics pane. Posture (solo|party) is latched per
+     side. Every size is a vmin/vh/vw multiple of --u: no fixed-px type. */
+  :root {
+    --u: 1vmin;
+    --bg: #070707;
+    --ink: #f2eee8;          /* warm off-white, never #fff */
+    --sub: #c4bdb2;
+    --dim: #8f887d;
+    --faint: #4a4741;
+    --accent: #c8a15a;       /* re-tinted from the art */
+    --art-glow: rgba(0,0,0,0);
+    --art-max: 100vw;        /* set from the cover's native size (<= ~1.75x) */
+    --pad: calc(var(--u) * 4.5);
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
+  html, body { height: 100%; }
   body {
-    background: #0a0a0a;
-    color: #fff;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
+    background: radial-gradient(130vmax 100vmax at 30% 40%, var(--art-glow), transparent 60%), var(--bg);
+    color: var(--ink);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    position: fixed; inset: 0; overflow: hidden;
+    transition: background 1.6s ease;
   }
 
-  #container {
-    display: flex;
-    align-items: center;
-    gap: 56px;
-    padding: 60px;
-    max-width: 1800px;
-    width: 100%;
-    height: 100vh;
-  }
+  /* blurred backdrop of the same art (party only) */
+  #bg { position: fixed; inset: 0; overflow: hidden; opacity: 0; transition: opacity 1.5s; z-index: 0; }
+  #bg img { width: 100%; height: 100%; object-fit: cover; filter: blur(calc(var(--u) * 5)) brightness(.38) saturate(1.2); transform: scale(1.2); }
+  body.party #bg { opacity: 1; }
+  body.idle #bg, body[data-view="boot"] #bg { opacity: 0; }
 
+  /* ---------- stage ---------- */
+  #stage {
+    position: relative; z-index: 1;
+    display: grid; height: 100vh; width: 100vw;
+    padding: var(--pad); gap: var(--pad);
+    grid-template-columns: minmax(0, 34vw) minmax(0, 1fr);
+    transition: opacity 1.2s;
+  }
+  body.idle #stage, body[data-view="boot"] #stage { opacity: 0; pointer-events: none; }
+
+  /* ---- left rail ---- */
+  #rail { display: flex; flex-direction: column; min-height: 0; min-width: 0; gap: calc(var(--u) * 2.2); }
   #art-wrap {
-    flex-shrink: 0;
-    width: 440px;
-    height: 440px;
-    border-radius: 12px;
-    overflow: hidden;
-    background: #1a1a1a;
-    box-shadow: 0 30px 80px rgba(0,0,0,0.8);
+    position: relative; flex: 0 0 auto;
+    width: min(100%, 56vh, var(--art-max)); aspect-ratio: 1 / 1;
+    border-radius: calc(var(--u) * 1); overflow: hidden; background: #141210;
+    box-shadow: 0 calc(var(--u) * 2.2) calc(var(--u) * 6) rgba(0,0,0,.75);
+  }
+  #art { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity .8s; }
+  #art.on { opacity: 1; }
+
+  #sleeve { font-size: calc(var(--u) * 1.8); color: var(--dim); line-height: 1.5; }
+  #sleeve:empty { display: none; }
+
+  #sides { overflow: hidden; min-height: 0; flex: 1 1 auto; }
+  .side-h { font-size: calc(var(--u) * 1.5); letter-spacing: .22em; text-transform: uppercase;
+            color: var(--faint); margin: 0 0 calc(var(--u) * .8); }
+  .trk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: calc(var(--u) * 1.4);
+         font-size: calc(var(--u) * 2); color: var(--dim); padding: calc(var(--u) * .35) 0; white-space: nowrap; }
+  .trk .t { overflow: hidden; text-overflow: ellipsis; }
+  .trk .d { color: var(--faint); font-variant-numeric: tabular-nums; }
+  .trk.done { color: var(--faint); }
+  .trk.now { color: var(--ink); }
+
+  /* needle rail: fill = position in track, ticks = the side's track boundaries */
+  #needle { display: flex; align-items: center; gap: calc(var(--u) * 1.2); flex: 0 0 auto;
+            font-size: calc(var(--u) * 1.6); color: var(--dim); font-variant-numeric: tabular-nums; }
+  #needle:empty, #needle.off { visibility: hidden; }
+  #bar { position: relative; flex: 1; height: calc(var(--u) * .7); background: #1d1b18; border-radius: calc(var(--u) * .4); }
+  #fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); border-radius: inherit;
+          transition: width 1s linear; }
+  #bar u { position: absolute; top: calc(var(--u) * -.3); bottom: calc(var(--u) * -.3); width: calc(var(--u) * .25);
+           background: var(--faint); text-decoration: none; }
+
+  /* ---- main column ---- */
+  #main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #id { flex: 0 0 auto; margin-bottom: calc(var(--u) * 2); min-width: 0; }
+  #track { font-size: calc(var(--u) * 7.4); font-weight: 700; line-height: 1.06; letter-spacing: -.02em;
+           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #artist { font-size: calc(var(--u) * 3.2); font-weight: 500; color: var(--sub); margin-top: calc(var(--u) * 1);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #album { font-size: calc(var(--u) * 2.4); color: var(--dim); margin-top: calc(var(--u) * .4);
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #id > div { transition: opacity .3s; }
+  #id.swap > div { opacity: 0; }
+
+  /* ---- pane: synced hero > plain block > tracklist (in-flight / miss) ---- */
+  #pane { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  #pane[data-state="synced"] #lyr-scroll, #pane[data-state="plain"] #lyr-scroll {
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+            mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent); }
+  #lyr-scroll { height: 100%; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
+  #lyr-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
+  #lyr-inner { padding: 30vh 0; }
+  #pane[data-state="plain"] #lyr-inner { padding: calc(var(--u) * 6) 0; }
+  #pane[data-state="flight"] #lyr-scroll, #pane[data-state="miss"] #lyr-scroll { display: none; }
+  .ln { font-size: calc(var(--u) * 3.6); font-weight: 600; line-height: 1.45; color: var(--faint);
+        padding: calc(var(--u) * .5) 0; white-space: pre-wrap; transition: color .4s, opacity .4s; }
+  .ln.past { opacity: .5; }
+  .ln.active { color: var(--ink); }
+  .ln.plain { color: var(--sub); font-size: calc(var(--u) * 3); font-weight: 500; }
+
+  /* tracklist promoted into the pane */
+  #pane #sides { height: 100%; display: flex; flex-direction: column; justify-content: center; }
+  #pane #sides .trk { font-size: calc(var(--u) * 3.2); padding: calc(var(--u) * .7) 0; }
+  #pane #sides .side-h { font-size: calc(var(--u) * 1.8); margin-bottom: calc(var(--u) * 1.4); }
+
+  /* ---------- PARTY: art-forward ---------- */
+  body.party #stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--u) * 2.4); }
+  body.party #rail { align-items: center; flex: 0 0 auto; width: 100%; gap: calc(var(--u) * 2); }
+  body.party #art-wrap { width: min(62vh, 90vw, var(--art-max)); }
+  body.party #needle { width: min(62vh, 90vw, var(--art-max)); }
+  body.party #sleeve, body.party #sides, body.party #pane { display: none; }
+  body.party #main { align-items: center; text-align: center; flex: 0 0 auto; width: 100%; }
+  body.party #id { margin: 0; }
+  body.party #track { font-size: calc(var(--u) * 6); -webkit-line-clamp: 1; }
+  body.party #artist { font-size: calc(var(--u) * 3); }
+
+  /* ---------- IDLE ---------- */
+  #idle { position: fixed; inset: 0; z-index: 2; opacity: 0; pointer-events: none; transition: opacity 1.5s; }
+  body.idle #idle { opacity: 1; }
+  body.idle.deep #idle { opacity: .3; }
+  #idle-block { position: absolute; left: var(--x, 50%); top: var(--y, 50%); transform: translate(-50%, -50%);
+                text-align: center; transition: left 10s ease-in-out, top 10s ease-in-out; }
+  #clock { font-size: calc(var(--u) * 13); font-weight: 300; color: #5a5650; letter-spacing: -.02em;
+           font-variant-numeric: tabular-nums; }
+  #stack { margin-top: calc(var(--u) * 3); width: min(60vw, 100vh); }
+  #stack .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: calc(var(--u) * 2);
+                font-size: calc(var(--u) * 2.1); color: var(--faint); padding: calc(var(--u) * .5) 0; text-align: left; }
+  #stack .row .a { color: var(--dim); }
+  #stack .row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---------- PORTRAIT ---------- */
+  @media (max-aspect-ratio: 1/1) {
+    #stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    #rail { align-items: center; }
+    #art-wrap { width: min(100%, 36vh, var(--art-max)); }
+    #needle { width: min(100%, 36vh, var(--art-max)); }
+    #rail > #sides { display: none; }
+    #track { font-size: calc(var(--u) * 6.6); }
+    body.party #art-wrap, body.party #needle { width: min(60vh, 90vw, var(--art-max)); }
   }
 
-  #art {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: none;
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
   }
 
-  #art-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  #art-placeholder svg {
-    width: 120px;
-    height: 120px;
-    opacity: 0.15;
-  }
-
-  #info {
-    flex: 0 0 320px;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
-
-  #state-badge {
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: #888;
-    margin-bottom: 24px;
-  }
-
-  #state-badge.playing { color: #1db954; }
-
-  #track {
-    font-size: 42px;
-    font-weight: 700;
-    line-height: 1.15;
-    margin-bottom: 20px;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-  }
-
-  #artist {
-    font-size: 28px;
-    font-weight: 500;
-    color: #ccc;
-    margin-bottom: 12px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  #album {
-    font-size: 22px;
-    font-weight: 400;
-    color: #666;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Lyrics column */
-  #lyrics-col {
-    flex: 1;
-    min-width: 0;
-    height: calc(100vh - 120px);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    overflow: hidden;
-    position: relative;
-  }
-
-  #lyrics-col::before,
-  #lyrics-col::after {
-    content: '';
-    position: absolute;
-    left: 0; right: 0;
-    height: 120px;
-    pointer-events: none;
-    z-index: 2;
-  }
-  #lyrics-col::before { top: 0; background: linear-gradient(to bottom, #0a0a0a, transparent); }
-  #lyrics-col::after  { bottom: 0; background: linear-gradient(to top, #0a0a0a, transparent); }
-
-  #lyrics-scroll {
-    overflow-y: auto;
-    height: 100%;
-    position: relative;
-    scroll-behavior: smooth;
-    scrollbar-width: none;        /* Firefox */
-    -ms-overflow-style: none;     /* legacy Edge */
-  }
-  /* Hide the scrollbar but keep it scrollable (wheel / touch / magic remote). */
-  #lyrics-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
-
-  #lyrics-inner {
-    transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    padding: 40vh 0;
-  }
-
-  .lyric-line {
-    font-size: 26px;
-    font-weight: 500;
-    line-height: 1.6;
-    color: #333;
-    transition: color 0.4s ease, font-size 0.4s ease;
-    padding: 4px 0;
-    cursor: default;
-    white-space: pre-wrap;
-  }
-
-  .lyric-line.active {
-    color: #fff;
-    font-size: 30px;
-  }
-
-  .lyric-line.past {
-    color: #444;
-  }
-
-  /* Plain (un-timestamped) lyrics: readable, no highlight/scroll */
-  .lyric-line.plain {
-    color: #999;
-  }
-
-  #lyrics-empty {
-    font-size: 18px;
-    color: #333;
-    font-style: italic;
-  }
-
-  #idle {
-    text-align: center;
-  }
-
-  #idle .big {
-    font-size: 80px;
-    opacity: 0.08;
-  }
-
-  #idle .msg {
-    font-size: 28px;
-    color: #444;
-    margin-top: 20px;
-  }
+  #debug { position: fixed; top: 0; left: 0; z-index: 99; display: none; background: rgba(0,0,0,.85); color: #8f8;
+           font: calc(var(--u) * 1.4) monospace; padding: var(--u); white-space: pre; }
 </style>
 </head>
-<body>
+<body data-view="boot">
 
-<div id="container" style="display:none">
-  <div id="art-wrap">
-    <img id="art" alt="">
-    <div id="art-placeholder">
-      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1">
-        <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
-        <line x1="12" y1="2" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="22"/>
-      </svg>
+<div id="bg"><img id="bgimg" alt=""></div>
+
+<div id="stage">
+  <div id="rail">
+    <div id="art-wrap"><img id="art" alt=""></div>
+    <div id="sleeve"></div>
+    <div id="sides"></div>
+    <div id="needle" class="off"><span id="npos"></span><div id="bar"><i id="fill"></i></div><span id="ntot"></span></div>
+  </div>
+  <div id="main">
+    <div id="id">
+      <div id="track"></div>
+      <div id="artist"></div>
+      <div id="album"></div>
     </div>
-  </div>
-  <div id="info">
-    <div id="state-badge">Now Playing</div>
-    <div id="track">—</div>
-    <div id="artist">—</div>
-    <div id="album">—</div>
-  </div>
-  <div id="lyrics-col">
-    <div id="lyrics-scroll">
-      <div id="lyrics-inner">
-        <div id="lyrics-empty" class="lyric-line">No lyrics found</div>
-      </div>
+    <div id="pane" data-state="flight">
+      <div id="lyr-scroll"><div id="lyr-inner"></div></div>
     </div>
   </div>
 </div>
 
 <div id="idle">
-  <div class="big">♫</div>
-  <div class="msg">Waiting for music…</div>
+  <div id="idle-block"><div id="clock"></div><div id="stack"></div></div>
 </div>
 
-<div id="debug" style="position:fixed;top:0;left:0;background:rgba(0,0,0,0.85);color:#0f0;font:14px monospace;padding:10px;white-space:pre;z-index:99;display:none;border-bottom-right-radius:8px"></div>
+<div id="debug"></div>
 
 <script>
-const params = new URLSearchParams(window.location.search);
-const HA    = params.get('ha')    || 'http://192.168.1.220:8123';
-const TOKEN = params.get('token') || '';
-const MASS_ENTITY     = 'media_player.denon_avr_x4800h_3';
-const SPOTIFY_ENTITY  = 'media_player.spotifyplus_chelsea';
-// Sibling MA player that exposes a healthy playback clock while CASTING
-// (e.g. Plexamp). During a cast the MA queue player (denon_3) reports a
-// nonsense position (past the track end), so we borrow this one's clock.
-const PLEX_CLOCK      = 'media_player.plex_music_assistant_music_assistant_plex';
-// Players to watch, in priority order — the page DISPLAYS whichever is playing.
-const ENTITIES = [MASS_ENTITY, SPOTIFY_ENTITY];
-// Extra entities consulted ONLY for a healthy clock (position), best first.
-const CLOCK_ENTITIES = [MASS_ENTITY, PLEX_CLOCK];
-// Per-mode lyric offset (seconds; + = earlier). When the displayed player's
-// own clock is healthy (vinyl / MA queue / direct), audio is ~in sync with
-// the clock. When we have to BORROW a sibling clock (casting), the real audio
-// is buffered well behind it, so we push the lyrics much later.
-const LEAD_DIRECT = 1.0;
-const LEAD_CAST   = -12.0;
-// ?lead=N forces a fixed offset, overriding the per-mode value.
+/* =================================================================
+   CONFIG (incumbent shape: HA base + token, ENTITIES / CLOCK_ENTITIES
+   priority, 3 s polling, sane-clock interpolation)
+   ================================================================= */
+const params = new URLSearchParams(location.search);
+const CONFIG = {
+  HA_BASE: params.get('ha') || 'http://192.168.1.220:8123',
+  TOKEN:   params.get('token') || '',
+  ENTITIES: ['media_player.denon_avr_x4800h_3', 'media_player.spotifyplus_chelsea'],
+  CLOCK_ENTITIES: ['media_player.denon_avr_x4800h_3',
+                   'media_player.plex_music_assistant_music_assistant_plex'],
+  POLL_MS: 3000,
+  LEAD_DIRECT: 1.0, LEAD_CAST: -12.0,
+  POSTURE_ENTITY: 'input_select.nowplaying_posture',   // auto | solo | party (default auto)
+  LYRICS_VIA_HA: false,                                // stage-2 pre-wire; stage 1 stays on in-page lrclib
+  EMPTY_POLLS_TO_IDLE: 2,        // two empty polls in a row (~6 s): no flicker on a gap
+  FAIL_POLLS_TO_IDLE: 20,        // HA unreachable: hold the screen ~60 s
+  PAUSE_IDLE_MS: 10 * 60 * 1000, // a record left paused this long goes idle
+  DEEP_IDLE_MS:  20 * 60 * 1000, // idle this long dims further
+  DRIFT_MS: 2 * 60 * 1000,       // pixel shift while playing / clock hop while idle
+  ART_MAX_SCALE: 1.75,           // party art never above ~1.75x its native pixels
+  // Optional Hue seam (this, or window.nowplayingHueSync), called once per art load with the sampled {r,g,b}. The screen glow
+  // is CSS only and never drives lights; only this hook may.
+  HUE_HOOK: null,
+};
+const URL_POSTURE = ['solo', 'party'].includes(params.get('posture')) ? params.get('posture') : null;
 const MANUAL_LEAD = params.has('lead') ? parseFloat(params.get('lead')) : null;
-let   activeLead  = LEAD_DIRECT;
-// Add ?debug=1 to the URL to show a live readout in the top-left corner.
 const DEBUG = params.has('debug');
+const HA = CONFIG.HA_BASE, TOKEN = CONFIG.TOKEN;
+const ENTITIES = CONFIG.ENTITIES, CLOCK_ENTITIES = CONFIG.CLOCK_ENTITIES;
 
-const container    = document.getElementById('container');
-const idle         = document.getElementById('idle');
-const art          = document.getElementById('art');
-const artPlaceholder = document.getElementById('art-placeholder');
-const stateBadge   = document.getElementById('state-badge');
-const trackEl      = document.getElementById('track');
-const artistEl     = document.getElementById('artist');
-const albumEl      = document.getElementById('album');
-const lyricsInner  = document.getElementById('lyrics-inner');
+const $ = id => document.getElementById(id);
+const bodyEl = document.body;
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const esc = s => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+const artEl = $('art'), bgImg = $('bgimg'), artWrap = $('art-wrap');
+const trackEl = $('track'), artistEl = $('artist'), albumEl = $('album'), idEl = $('id');
+const sleeveEl = $('sleeve'), sidesEl = $('sides'), railEl = $('rail'), paneEl = $('pane'), needleEl = $('needle');
+const lyrInner = $('lyr-inner'), lyrScroll = $('lyr-scroll'), stackEl = $('stack'), clockEl = $('clock');
+const debugEl = $('debug');
+if (DEBUG) debugEl.style.display = 'block';
 
-let lyricsLines    = [];   // [{time, text}]
-let lyricsSynced   = false;
-let currentTrack   = '';
-let currentArtist  = '';
-let lyricEls       = [];
-let activeIdx      = -1;
-
-// Live playback position tracking (refreshed each poll, advanced by ticker)
-let posBase = 0, posUpdatedAtMs = 0, isPlaying = false;
-let lastEntity = '', lastState = '';
-// Clock health (Option A/C): which entity's clock we're using, the mode, and
-// whether it's usable at all. When unhealthy, lyrics show static (Option C).
-let clockHealthy = true, clockMode = 'direct', clockEntity = '';
-let staticShown = false;
-// Manual scrolling: any wheel/touch pauses auto-follow so you can read liner
-// notes baked into the lyrics; it resumes after you stop (or on track change).
-let userScrolling = false, userScrollTimer = null;
+/* ---------------- state ---------------- */
+let lyricsLines = [], lyricsSynced = false, lyricEls = [], activeIdx = -1;
+let paneState = 'flight';                 // flight | synced | plain | miss
+let currentKey = '', currentTrack = '', currentArtist = '', currentAlbum = '', albumKey = '';
+let posBase = 0, posUpdatedAtMs = 0, isPlaying = false, curDuration = 0;
+let clockHealthy = true, clockMode = 'direct', clockEntity = '', activeLead = CONFIG.LEAD_DIRECT;
+let staticShown = false, userScrolling = false, userScrollTimer = null;
 const RESUME_MS = 15000;
+let lastEntity = '', lastState = '';
+const mbCache = {};
+let curInfo = null;                       // {year,label,cat,country,sides:[{label,tracks:[{title,ms}]}]}
+let latch = null;                         // {mode:'solo'|'party', album, side}
+let selectPosture = 'auto';
+let artUrl = '';
+const stack = [];
+let emptyPolls = 0, failPolls = 0, pausedSince = 0, idleSince = 0, lastDrift = 0, lastSidesHtml = '';
 
-const debugEl = document.getElementById('debug');
-if (DEBUG && debugEl) debugEl.style.display = 'block';
-
+/* ---------------- HA REST ---------------- */
 async function fetchState(entity) {
-  const res = await fetch(`${HA}/api/states/${entity}`, {
-    headers: { 'Authorization': `Bearer ${TOKEN}` }
-  });
-  if (!res.ok) return null;
-  return res.json();
+  try {
+    const res = await fetch(`${HA}/api/states/${entity}`, { headers: { 'Authorization': `Bearer ${TOKEN}` } });
+    return res.ok ? res.json() : null;
+  } catch (e) { return null; }
 }
-
-// A playback clock is "sane" only if its position fits within the track.
-// Casting makes the MA queue player report positions past the track end.
 function clockSane(a) {
   const p = a.media_position, d = a.media_duration;
   return typeof p === 'number' && typeof d === 'number' && d > 0 && p >= -1 && p <= d + 2;
 }
-function sameTrack(a, title) {
-  return !!title && (a.media_title || '') === title;
-}
+const sameTrack = (a, title) => !!title && (a.media_title || '') === title;
+const currentPosition = () => posBase + (isPlaying ? (Date.now() - posUpdatedAtMs) / 1000 : 0) + activeLead;
 
+/* ---------------- lyrics supply (incumbent in-page lrclib get -> search) ---------------- */
 function parseLRC(lrc) {
   const lines = [];
   for (const raw of lrc.split('\n')) {
     const m = raw.match(/^\[(\d+):(\d+(?:\.\d+)?)\](.*)/);
     if (!m) continue;
-    const time = parseInt(m[1]) * 60 + parseFloat(m[2]);
-    const text = m[3].trim();
-    lines.push({ time, text });
+    lines.push({ time: parseInt(m[1]) * 60 + parseFloat(m[2]), text: m[3].trim() });
   }
   return lines.sort((a, b) => a.time - b.time);
 }
-
-// Returns {lines, synced} or null. Prefers a real synced version from
-// lrclib (exact match first, then fuzzy search); only uses plain as a
-// last resort and never fakes timestamps for it.
+const plainLines = t => t.split('\n').map(x => ({ time: null, text: x }));
 async function fetchLyrics(artist, track, album, duration) {
+  if (CONFIG.LYRICS_VIA_HA) {
+    try {
+      const u = `${HA}/api/lyrics?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`
+              + (album ? `&album=${encodeURIComponent(album)}` : '')
+              + (duration ? `&duration=${Math.round(duration)}` : '');
+      const res = await fetch(u, { headers: { 'Authorization': `Bearer ${TOKEN}` } });
+      if (res.ok) { const d = await res.json(); if (d && d.lines) return { lines: d.lines, synced: !!d.synced }; }
+    } catch (e) {}
+    return null;
+  }
   try {
     let getUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(track)}`;
-    if (album)    getUrl += `&album_name=${encodeURIComponent(album)}`;
+    if (album) getUrl += `&album_name=${encodeURIComponent(album)}`;
     if (duration) getUrl += `&duration=${Math.round(duration)}`;
     let res = await fetch(getUrl);
     let data = res.ok ? await res.json() : null;
     if (data && data.syncedLyrics) return { lines: parseLRC(data.syncedLyrics), synced: true };
-
-    const searchUrl = `https://lrclib.net/api/search?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(track)}`;
-    res = await fetch(searchUrl);
+    res = await fetch(`https://lrclib.net/api/search?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(track)}`);
     const list = res.ok ? await res.json() : null;
     if (list && list.length) {
-      for (const item of list) {
-        if (item.syncedLyrics) return { lines: parseLRC(item.syncedLyrics), synced: true };
-      }
-      for (const item of list) {
-        if (item.plainLyrics) return { lines: item.plainLyrics.split('\n').map(t => ({ time: null, text: t })), synced: false };
-      }
+      for (const it of list) if (it.syncedLyrics) return { lines: parseLRC(it.syncedLyrics), synced: true };
+      for (const it of list) if (it.plainLyrics) return { lines: plainLines(it.plainLyrics), synced: false };
     }
-    if (data && data.plainLyrics) {
-      return { lines: data.plainLyrics.split('\n').map(t => ({ time: null, text: t })), synced: false };
-    }
+    if (data && data.plainLyrics) return { lines: plainLines(data.plainLyrics), synced: false };
   } catch (e) {}
   return null;
 }
-
 function renderLyrics(lines, synced) {
-  lyricsInner.innerHTML = '';
-  lyricEls = [];
-  activeIdx = -1;
-
-  if (!lines || lines.length === 0) {
-    const el = document.createElement('div');
-    el.className = 'lyric-line';
-    el.textContent = 'No lyrics found';
-    lyricsInner.appendChild(el);
-    return;
-  }
-
+  lyrInner.innerHTML = ''; lyricEls = []; activeIdx = -1; staticShown = false;
+  if (!lines || !lines.length) return;
   for (const line of lines) {
-    const el = document.createElement('div');
-    // Plain (unsynced) lyrics render in a readable static color.
-    el.className = synced ? 'lyric-line' : 'lyric-line plain';
-    el.textContent = line.text || '';
-    lyricsInner.appendChild(el);
-    lyricEls.push(el);
+    const d = document.createElement('div');
+    d.className = synced ? 'ln' : 'ln plain';
+    d.textContent = line.text || '';
+    lyrInner.appendChild(d); lyricEls.push(d);
   }
+  lyrScroll.scrollTop = 0;
 }
-
 function scrollToLine(idx) {
-  if (idx < 0 || idx >= lyricEls.length) return;
-  if (userScrolling) return;   // don't fight a manual scroll
-  const scrollEl = document.getElementById('lyrics-scroll');
-  const el = lyricEls[idx];
-  scrollEl.scrollTop = el.offsetTop - (scrollEl.clientHeight / 2) + (el.offsetHeight / 2);
+  if (idx < 0 || idx >= lyricEls.length || userScrolling) return;
+  const e = lyricEls[idx];
+  lyrScroll.scrollTop = e.offsetTop - (lyrScroll.clientHeight / 2) + (e.offsetHeight / 2);
 }
-
-function updateActiveLineByTime(positionSec) {
+function updateActiveLineByTime(pos) {
   if (!lyricsSynced || !lyricsLines.length || !lyricEls.length) return;
-
   let idx = -1;
-  for (let i = 0; i < lyricsLines.length; i++) {
-    if (lyricsLines[i].time <= positionSec) idx = i;
-    else break;
-  }
-
+  for (let i = 0; i < lyricsLines.length; i++) { if (lyricsLines[i].time <= pos) idx = i; else break; }
   if (idx === activeIdx) return;
   activeIdx = idx;
-
-  for (let i = 0; i < lyricEls.length; i++) {
-    if (i < idx) lyricEls[i].className = 'lyric-line past';
-    else if (i === idx) lyricEls[i].className = 'lyric-line active';
-    else lyricEls[i].className = 'lyric-line';
-  }
+  for (let i = 0; i < lyricEls.length; i++)
+    lyricEls[i].className = i < idx ? 'ln past' : i === idx ? 'ln active' : 'ln';
   scrollToLine(idx);
 }
-
-function currentPosition() {
-  return posBase + (isPlaying ? (Date.now() - posUpdatedAtMs) / 1000 : 0) + activeLead;
-}
-
-// Smooth highlight ticker — advances the active line between polls so the
-// highlight glides with the music instead of jumping every 3 seconds.
-// When the clock is unhealthy (e.g. casting with no borrowable clock),
-// freeze the lyrics in a readable static state instead of scrubbing wrong.
 function showStaticLyrics() {
   if (staticShown) return;
-  staticShown = true;
-  activeIdx = -1;
-  for (const el of lyricEls) el.className = 'lyric-line plain';
-  document.getElementById('lyrics-scroll').scrollTop = 0;
+  staticShown = true; activeIdx = -1;
+  for (const e of lyricEls) e.className = 'ln plain';
+  lyrScroll.scrollTop = 0;
 }
 
-setInterval(function () {
-  const pos = currentPosition();
-  if (lyricsSynced && clockHealthy) {
-    staticShown = false;
-    updateActiveLineByTime(pos);
-  } else if (lyricsSynced) {
-    showStaticLyrics();   // synced lyrics but no usable clock -> static (Option C)
+/* ---------------- posture: latched per side, overridable ---------------- */
+function locate() {               // where is the current track inside the MB tracklist?
+  if (!curInfo || !curInfo.sides) return null;
+  const k = norm(currentTrack);
+  for (let s = 0; s < curInfo.sides.length; s++) {
+    const ts = curInfo.sides[s].tracks;
+    for (let t = 0; t < ts.length; t++) if (norm(ts[t].title) === k) return { s, t };
   }
-  if (DEBUG && debugEl) {
-    const first = lyricsLines.length ? lyricsLines[0].time : '-';
-    const last = lyricsLines.length ? lyricsLines[lyricsLines.length - 1].time.toFixed(1) : '-';
-    debugEl.textContent =
-      `display:  ${lastEntity}\n` +
-      `clock:    ${clockEntity} [${clockMode}]\n` +
-      `lead:     ${activeLead}  healthy:${clockHealthy}\n` +
-      `state:    ${lastState}  playing:${isPlaying}\n` +
-      `posBase:  ${posBase.toFixed(1)}\n` +
-      `position: ${pos.toFixed(1)}\n` +
-      `synced:   ${lyricsSynced}  lines:${lyricsLines.length}\n` +
-      `activeIdx:${activeIdx}\n` +
-      `lyricTimes: ${first} .. ${last}`;
+  return null;
+}
+function reconcileLatch() {       // new album or new side clears the latch; unknown side adopts when learnt
+  if (!latch) return;
+  const loc = locate();
+  if (latch.album !== albumKey) { latch = null; return; }
+  if (loc) {
+    if (latch.side == null) latch.side = loc.s;
+    else if (latch.side !== loc.s) latch = null;
   }
-}, 200);
+}
+function effectivePosture() {
+  if (URL_POSTURE) return URL_POSTURE;
+  if (selectPosture === 'solo' || selectPosture === 'party') return selectPosture;
+  return latch ? latch.mode : 'solo';
+}
+function applyPosture() {
+  const p = effectivePosture();
+  bodyEl.classList.toggle('party', p === 'party');
+  bodyEl.dataset.posture = p;
+  bodyEl.dataset.latch = latch ? latch.mode : '';
+  // pane ladder: tracklist rides in the pane while lyrics are in flight or missed (solo only)
+  const inPane = p === 'solo' && (paneState === 'flight' || paneState === 'miss');
+  const host = inPane ? paneEl : railEl;
+  if (sidesEl.parentNode !== host) { if (inPane) paneEl.appendChild(sidesEl); else railEl.insertBefore(sidesEl, needleEl); }
+  paneEl.dataset.state = paneState;
+}
+function setPane(state) { paneState = state; applyPosture(); }
+function settleLyrics(r) {
+  if (r && r.lines && r.lines.length) {
+    lyricsLines = r.lines; lyricsSynced = !!r.synced;
+    renderLyrics(lyricsLines, lyricsSynced);
+    if (!latch) latch = { mode: lyricsSynced ? 'solo' : 'party', album: albumKey, side: (locate() || {}).s ?? null };
+    setPane(lyricsSynced ? 'synced' : 'plain');
+  } else {
+    lyricsLines = []; lyricsSynced = false; renderLyrics(null, false);
+    if (!latch) latch = { mode: 'party', album: albumKey, side: (locate() || {}).s ?? null };
+    setPane('miss');
+  }
+}
 
+/* ---------------- art: swap only after the new cover has loaded ---------------- */
+function loadArt(url) {
+  const im = new Image();
+  im.onload = () => {
+    if (url !== artUrl) return;
+    artEl.src = url; bgImg.src = url; artEl.classList.add('on');
+    const cap = Math.round(im.naturalWidth * CONFIG.ART_MAX_SCALE / (window.devicePixelRatio || 1));
+    document.documentElement.style.setProperty('--art-max', cap + 'px');
+    recolourFromArt(im);
+  };
+  im.onerror = () => {
+    if (url !== artUrl) return;
+    artEl.classList.remove('on');
+    document.documentElement.style.setProperty('--art-glow', 'rgba(0,0,0,0)');
+  };
+  im.src = url;
+}
+function recolourFromArt(im) {
+  let rgb = null;
+  try {
+    const c = document.createElement('canvas'); c.width = c.height = 12;
+    const g = c.getContext('2d'); g.drawImage(im, 0, 0, 12, 12);
+    const d = g.getImageData(0, 0, 12, 12).data;
+    let r = 0, gg = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const mx = Math.max(d[i], d[i+1], d[i+2]), mn = Math.min(d[i], d[i+1], d[i+2]);
+      if (mx - mn < 24) continue;
+      r += d[i]; gg += d[i+1]; b += d[i+2]; n++;
+    }
+    if (n) {
+      rgb = { r: (r/n)|0, g: (gg/n)|0, b: (b/n)|0 };
+      const root = document.documentElement.style;
+      root.setProperty('--accent', `rgb(${rgb.r},${rgb.g},${rgb.b})`);
+      root.setProperty('--art-glow', `rgba(${rgb.r},${rgb.g},${rgb.b},0.16)`);
+    }
+  } catch (e) { /* tainted canvas: keep default accent */ }
+  syncHue(rgb);
+}
+// Hue seam, same art-load point as the incumbent's. The page itself makes no light call.
+function syncHue(rgb) {
+  try { const f = CONFIG.HUE_HOOK || window.nowplayingHueSync; if (typeof f === 'function') f(rgb, artUrl); } catch (e) {}
+}
+
+/* ---------------- MusicBrainz sleeve-back + side tracklist ---------------- */
+function fmtDur(ms) {
+  if (!ms) return '';
+  const s = Math.round(ms / 1000); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+}
+async function enrich(artist, album, key) {
+  if (!album) { applyInfo(null, key); return; }
+  if (mbCache[key]) { applyInfo(mbCache[key], key); return; }
+  try {
+    const q = `release:"${album}" AND artist:"${artist}"`;
+    let res = await fetch(`https://musicbrainz.org/ws/2/release/?query=${encodeURIComponent(q)}&fmt=json&limit=1`);
+    const j = res.ok ? await res.json() : null;
+    const rel = j && j.releases && j.releases[0];
+    if (!rel) { mbCache[key] = { empty: true }; applyInfo(null, key); return; }
+    res = await fetch(`https://musicbrainz.org/ws/2/release/${rel.id}?inc=recordings+labels+artist-credits&fmt=json`);
+    const full = res.ok ? await res.json() : rel;
+    const li = (full['label-info'] && full['label-info'][0]) || {};
+    const info = {
+      year: (full.date || rel.date || '').slice(0, 4),
+      label: (li.label && li.label.name) || '',
+      cat: li['catalog-number'] || '',
+      country: full.country || rel.country || '',
+      sides: [],
+    };
+    const media = full.media || [], groups = new Map();
+    media.forEach((m, mi) => (m.tracks || []).forEach(t => {
+      const L = /^([A-Za-z]+)\d/.exec(t.number || '');
+      const gk = L ? 'S' + L[1].toUpperCase() : 'D' + mi;
+      if (!groups.has(gk)) groups.set(gk, { label: L ? `Side ${L[1].toUpperCase()}` : (media.length > 1 ? `Disc ${mi + 1}` : ''), tracks: [] });
+      groups.get(gk).tracks.push({ title: t.title, ms: t.length || 0 });
+    }));
+    info.sides = [...groups.values()];
+    mbCache[key] = info;
+    applyInfo(info, key);
+  } catch (e) { applyInfo(null, key); }
+}
+function applyInfo(info, key) {
+  if (key !== albumKey) return;                      // a newer album took over
+  curInfo = info && !info.empty ? info : null;
+  sleeveEl.textContent = curInfo
+    ? [curInfo.year, curInfo.label, curInfo.cat, curInfo.country].filter(Boolean).join(' · ') : '';
+  reconcileLatch();
+  paintSides(true); paintNeedle(); applyPosture();
+}
+function paintSides(force) {                          // current side only; repaint only on change
+  const loc = locate();
+  let html = '';
+  if (loc) {
+    const side = curInfo.sides[loc.s];
+    if (side.label) html += `<div class="side-h">${esc(side.label)}</div>`;
+    side.tracks.forEach((t, i) => {
+      const cls = i < loc.t ? 'trk done' : i === loc.t ? 'trk now' : 'trk';
+      html += `<div class="${cls}"><span class="t">${esc(t.title)}</span><span class="d">${fmtDur(t.ms)}</span></div>`;
+    });
+  }
+  if (force || html !== lastSidesHtml) { sidesEl.innerHTML = html; lastSidesHtml = html; }
+}
+function mmss(sec) { sec = Math.max(0, Math.floor(sec)); return `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`; }
+function paintNeedle() {
+  if (!currentTrack || !curDuration) { needleEl.classList.add('off'); return; }
+  needleEl.classList.remove('off');
+  const pos = Math.max(0, Math.min(curDuration, currentPosition()));
+  const loc = locate();
+  const bar = $('bar'), fill = $('fill');
+  bar.querySelectorAll('u').forEach(u => u.remove());
+  let frac = pos / curDuration;
+  if (loc) {
+    const ts = curInfo.sides[loc.s].tracks;
+    const total = ts.reduce((a, x) => a + (x.ms || 0), 0);
+    if (total > 0 && ts.every(x => x.ms)) {
+      let acc = 0;
+      for (let i = 0; i < ts.length; i++) {
+        if (i === loc.t) frac = (acc + Math.min(pos * 1000, ts[i].ms)) / total;
+        acc += ts[i].ms;
+        if (i < ts.length - 1) {
+          const u = document.createElement('u'); u.style.left = (acc / total * 100).toFixed(2) + '%'; bar.appendChild(u);
+        }
+      }
+    }
+  }
+  fill.style.width = (Math.max(0, Math.min(1, frac)) * 100).toFixed(2) + '%';
+  $('npos').textContent = mmss(pos); $('ntot').textContent = mmss(curDuration);
+}
+
+/* ---------------- idle: clock, tonight's stack ---------------- */
+function noteStack(artist, title) {
+  if (!title) return;
+  const last = stack[stack.length - 1];
+  if (last && last.title === title && last.artist === artist) return;
+  stack.push({ artist, title });
+  if (stack.length > 8) stack.shift();
+}
+function paintStack() {
+  stackEl.innerHTML = stack.slice().reverse()
+    .map(s => `<div class="row"><span class="t">${esc(s.title)}</span><span class="a">${esc(s.artist)}</span></div>`).join('');
+}
+function tickClock() {
+  clockEl.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (bodyEl.dataset.view === 'idle' && Date.now() - idleSince > CONFIG.DEEP_IDLE_MS) bodyEl.classList.add('deep');
+}
+function drift(force) {                               // burn-in care; full stop under reduced motion
+  if (reduced()) return;
+  const now = Date.now();
+  if (!force && now - lastDrift < CONFIG.DRIFT_MS) return;
+  lastDrift = now;
+  const r = n => ((Math.random() * 2 - 1) * n).toFixed(1);
+  $('stage').style.transform = `translate(${r(0.6)}vmin, ${r(0.6)}vmin)`;
+  const blk = $('idle-block');
+  blk.style.setProperty('--x', (30 + Math.random() * 40) + '%');
+  blk.style.setProperty('--y', (32 + Math.random() * 36) + '%');
+}
+function setView(v) {
+  if (bodyEl.dataset.view === v) return;
+  bodyEl.dataset.view = v;
+  bodyEl.classList.toggle('idle', v === 'idle');
+  if (v === 'idle') { idleSince = Date.now(); paintStack(); drift(true); tickClock(); }
+  else bodyEl.classList.remove('deep');
+}
+function goIdle(keepTrack) {
+  setView('idle');
+  isPlaying = false; lastState = 'idle'; lastEntity = '';
+  if (!keepTrack) {
+    currentKey = currentTrack = currentArtist = currentAlbum = albumKey = ''; curInfo = null; latch = null;
+    lyricsLines = []; lyricsSynced = false; renderLyrics(null, false); paneState = 'flight'; curDuration = 0;
+  }
+}
+
+/* ---------------- tickers ---------------- */
+setInterval(() => {
+  const pos = currentPosition();
+  if (lyricsSynced && clockHealthy) { staticShown = false; updateActiveLineByTime(pos); }
+  else if (lyricsSynced) showStaticLyrics();
+  if (DEBUG) debugEl.textContent =
+    `display: ${lastEntity}\nclock:   ${clockEntity} [${clockMode}] healthy:${clockHealthy}\n` +
+    `state:   ${lastState} playing:${isPlaying}\nposition:${pos.toFixed(1)}/${curDuration}\n` +
+    `pane:    ${paneState} posture:${effectivePosture()} latch:${latch ? latch.mode : '-'}`;
+}, 200);
+setInterval(() => {
+  if (bodyEl.dataset.view === 'np') { paintNeedle(); paintSides(false); }
+  tickClock(); drift(false);
+}, 1000);
+
+/* ---------------- track change ---------------- */
+function onTrackChange(attrs) {
+  const key = `${currentArtist}|${currentTrack}|${currentAlbum}`;
+  currentKey = key;
+  // Never leave the previous song's words up: clear now, tracklist rides in the pane until lyrics land.
+  lyricsLines = []; lyricsSynced = false; renderLyrics(null, false);
+  userScrolling = false; clearTimeout(userScrollTimer);
+  noteStack(currentArtist, currentTrack);
+  const ak = `${currentArtist}|${currentAlbum}`.toLowerCase();
+  if (ak !== albumKey) { albumKey = ak; curInfo = null; sleeveEl.textContent = ''; paintSides(true); enrich(currentArtist, currentAlbum, ak); }
+  reconcileLatch();
+  setPane('flight');
+  document.title = currentTrack ? `${currentTrack} — ${currentArtist}` : 'Vinyl';
+  idEl.classList.add('swap');
+  setTimeout(() => {
+    if (key !== currentKey) return;
+    trackEl.textContent = currentTrack; artistEl.textContent = currentArtist; albumEl.textContent = currentAlbum;
+    idEl.classList.remove('swap');
+  }, reduced() ? 0 : 250);
+  if (currentTrack && currentArtist) {
+    fetchLyrics(currentArtist, currentTrack, currentAlbum, attrs.media_duration).then(r => {
+      if (key === currentKey) settleLyrics(r);          // identity-keyed: stale results are dropped
+    });
+  } else settleLyrics(null);
+}
+
+/* ---------------- main poll ---------------- */
 async function update() {
   try {
-    // Read all candidate players and use whichever is actually playing
-    // (prefer 'playing' over a stale 'paused'). This makes the page follow
-    // Music Assistant, Spotify, Plex-via-MA — whatever is live right now.
-    // Fetch every entity we might display OR borrow a clock from.
     const allEnts = ENTITIES.concat(CLOCK_ENTITIES).filter((e, i, a) => a.indexOf(e) === i);
+    const [sel, ...got] = await Promise.all([fetchState(CONFIG.POSTURE_ENTITY), ...allEnts.map(fetchState)]);
+    const prevSel = selectPosture;
+    selectPosture = sel && ['auto', 'solo', 'party'].includes(sel.state) ? sel.state : 'auto';
     const byEnt = {};
-    for (const ent of allEnts) {
-      const s = await fetchState(ent);
-      if (s) byEnt[ent] = { ent: ent, s: s, attrs: s.attributes || {} };
-    }
-    const snaps = ENTITIES.map(function (e) { return byEnt[e]; }).filter(Boolean);
-    const chosen =
-      snaps.find(function (x) { return x.s.state === 'playing' && x.attrs.media_title; }) ||
-      snaps.find(function (x) { return x.s.state === 'paused'  && x.attrs.media_title; }) ||
-      snaps.find(function (x) { return x.s.state === 'playing' || x.s.state === 'paused'; }) ||
-      null;
-
-    let data = chosen ? chosen.s : null;
-    let attrs = chosen ? chosen.attrs : {};
-    let usedEntity = chosen ? chosen.ent : '';
-    if (!data) {
-      container.style.display = 'none';
-      idle.style.display = 'block';
-      currentTrack = ''; currentArtist = ''; lyricsLines = []; lyricsSynced = false; isPlaying = false;
-      lastEntity = ''; lastState = 'idle';
+    allEnts.forEach((ent, i) => { if (got[i]) byEnt[ent] = { ent, s: got[i], attrs: got[i].attributes || {} }; });
+    if (!got.some(Boolean) && !sel) {
+      if (++failPolls >= CONFIG.FAIL_POLLS_TO_IDLE) goIdle();
       return;
     }
+    failPolls = 0;
+    const snaps = ENTITIES.map(e => byEnt[e]).filter(Boolean);
+    const chosen =
+      snaps.find(x => x.s.state === 'playing' && x.attrs.media_title) ||
+      snaps.find(x => x.s.state === 'paused'  && x.attrs.media_title) ||
+      snaps.find(x => x.s.state === 'playing' || x.s.state === 'paused') || null;
 
-    const state = data.state;
-    lastEntity = usedEntity;
-    lastState = state;
-
-    if (state === 'playing' || state === 'paused') {
-      container.style.display = 'flex';
-      idle.style.display = 'none';
-
-      stateBadge.textContent = state === 'playing' ? 'Now Playing' : 'Paused';
-      stateBadge.className   = state === 'playing' ? 'playing' : '';
-
-      const newTrack  = attrs.media_title  || '';
-      const newArtist = attrs.media_artist || '';
-
-      trackEl.textContent  = newTrack  || '—';
-      artistEl.textContent = newArtist || '—';
-      albumEl.textContent  = attrs.media_album_name || '—';
-
-      if (attrs.entity_picture) {
-        const artUrl = attrs.entity_picture.startsWith('http')
-          ? attrs.entity_picture
-          : `${HA}${attrs.entity_picture}`;
-        if (art.src !== artUrl) {
-          art.src = artUrl;
-          art.style.display = 'block';
-          artPlaceholder.style.display = 'none';
-          art.onerror = () => {
-            art.style.display = 'none';
-            artPlaceholder.style.display = 'flex';
-          };
-        }
-      } else {
-        art.style.display = 'none';
-        artPlaceholder.style.display = 'flex';
-      }
-
-      // --- Option A: choose the healthiest clock for THIS track ---
-      // Prefer the displayed player's own clock; if it's missing/insane (the
-      // cast quirk), borrow a sibling playing the same track with a sane
-      // position. If nothing is usable, mark the clock unhealthy (-> static).
-      let clk = null, borrowed = false;
-      const clockCands = [usedEntity].concat(CLOCK_ENTITIES).filter((e, i, a) => a.indexOf(e) === i);
-      for (const ent of clockCands) {
-        const c = byEnt[ent];
-        if (c && sameTrack(c.attrs, newTrack) && clockSane(c.attrs)) {
-          clk = c; borrowed = (ent !== usedEntity); break;
-        }
-      }
-      if (clk) {
-        clockHealthy = true;
-        clockEntity  = clk.ent;
-        clockMode    = borrowed ? 'cast' : 'direct';
-        posBase = clk.attrs.media_position || 0;
-        posUpdatedAtMs = clk.attrs.media_position_updated_at
-          ? Date.parse(clk.attrs.media_position_updated_at)
-          : Date.now();
-        isPlaying = (state === 'playing');
-        activeLead = (MANUAL_LEAD !== null) ? MANUAL_LEAD
-                                            : (borrowed ? LEAD_CAST : LEAD_DIRECT);
-      } else {
-        clockHealthy = false;      // Option C: no usable clock -> static lyrics
-        clockEntity  = '(none)';
-        clockMode    = 'static';
-        isPlaying    = false;
-      }
-
-      // Fetch lyrics when the track changes. Keep the current lyrics on
-      // screen until the new ones arrive, so there's no blank flash.
-      if (newTrack !== currentTrack || newArtist !== currentArtist) {
-        currentTrack  = newTrack;
-        currentArtist = newArtist;
-        lyricsSynced  = false;   // pause highlighting during the fetch
-        activeIdx     = -1;
-        userScrolling = false;   // new track -> resume auto-follow
-        clearTimeout(userScrollTimer);
-
-        if (newTrack && newArtist) {
-          const result = await fetchLyrics(newArtist, newTrack, attrs.media_album_name, attrs.media_duration);
-          lyricsLines  = result ? result.lines : [];
-          lyricsSynced = result ? result.synced : false;
-          renderLyrics(lyricsLines, lyricsSynced);
-        } else {
-          lyricsLines = [];
-          renderLyrics(null, false);
-        }
-      }
-
-    } else {
-      container.style.display = 'none';
-      idle.style.display = 'block';
-      currentTrack  = '';
-      currentArtist = '';
-      lyricsLines   = [];
-      lyricsSynced  = false;
-      isPlaying     = false;
+    if (!chosen) {
+      if (++emptyPolls >= (bodyEl.dataset.view === 'boot' ? 1 : CONFIG.EMPTY_POLLS_TO_IDLE)) goIdle();
+      return;
     }
-  } catch (e) {
-    // silently retry
-  }
+    emptyPolls = 0;
+    const data = chosen.s, attrs = chosen.attrs;
+    lastEntity = chosen.ent; lastState = data.state;
+    if (data.state === 'paused') { if (!pausedSince) pausedSince = Date.now(); } else pausedSince = 0;
+    if (pausedSince && Date.now() - pausedSince > CONFIG.PAUSE_IDLE_MS) { goIdle(true); return; }
+    if (bodyEl.dataset.view !== 'np') setView('np');
+
+    const newTrack = attrs.media_title || '', newArtist = attrs.media_artist || '', newAlbum = attrs.media_album_name || '';
+    curDuration = attrs.media_duration || 0;
+
+    // cover
+    if (attrs.entity_picture) {
+      const u = attrs.entity_picture.startsWith('http') ? attrs.entity_picture : `${HA}${attrs.entity_picture}`;
+      if (u !== artUrl) { artUrl = u; loadArt(u); }
+    } else if (artUrl) { artUrl = ''; artEl.classList.remove('on'); }
+
+    // clock health (cast-drift fix, unchanged)
+    let clk = null, borrowed = false;
+    const cands = [chosen.ent].concat(CLOCK_ENTITIES).filter((e, i, a) => a.indexOf(e) === i);
+    for (const ent of cands) {
+      const c = byEnt[ent];
+      if (c && sameTrack(c.attrs, newTrack) && clockSane(c.attrs)) { clk = c; borrowed = ent !== chosen.ent; break; }
+    }
+    if (clk) {
+      clockHealthy = true; clockEntity = clk.ent; clockMode = borrowed ? 'cast' : 'direct';
+      posBase = clk.attrs.media_position || 0;
+      posUpdatedAtMs = clk.attrs.media_position_updated_at ? Date.parse(clk.attrs.media_position_updated_at) : Date.now();
+      isPlaying = data.state === 'playing';
+      activeLead = MANUAL_LEAD !== null ? MANUAL_LEAD : (borrowed ? CONFIG.LEAD_CAST : CONFIG.LEAD_DIRECT);
+    } else { clockHealthy = false; clockEntity = '(none)'; clockMode = 'static'; isPlaying = false; }
+
+    if (newTrack !== currentTrack || newArtist !== currentArtist || newAlbum !== currentAlbum || !currentKey) {
+      currentTrack = newTrack; currentArtist = newArtist; currentAlbum = newAlbum;
+      onTrackChange(attrs);
+    } else if (selectPosture !== prevSel) applyPosture();
+    applyPosture();
+  } catch (e) { /* silent retry */ }
 }
 
-// Wire up manual scroll detection on the lyrics pane. A wheel/touch gesture
-// pauses auto-follow; programmatic scrolls don't fire these, so they're safe.
+/* manual scroll pauses auto-follow */
 (function () {
-  const scrollEl = document.getElementById('lyrics-scroll');
-  function onUserScroll() {
-    userScrolling = true;
-    clearTimeout(userScrollTimer);
-    userScrollTimer = setTimeout(function () { userScrolling = false; }, RESUME_MS);
-  }
-  ['wheel', 'touchstart', 'touchmove'].forEach(function (ev) {
-    scrollEl.addEventListener(ev, onUserScroll, { passive: true });
-  });
+  function onScroll() { userScrolling = true; clearTimeout(userScrollTimer);
+    userScrollTimer = setTimeout(() => { userScrolling = false; }, RESUME_MS); }
+  ['wheel', 'touchstart', 'touchmove'].forEach(ev => lyrScroll.addEventListener(ev, onScroll, { passive: true }));
 })();
 
+tickClock();
 update();
-setInterval(update, 3000);
+setInterval(update, CONFIG.POLL_MS);
 </script>
 </body>
 </html>
