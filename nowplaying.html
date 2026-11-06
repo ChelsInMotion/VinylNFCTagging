@@ -201,7 +201,7 @@ const CONFIG = {
   POLL_MS: 3000,
   LEAD_DIRECT: 1.0, LEAD_CAST: -12.0,
   POSTURE_ENTITY: 'input_select.nowplaying_posture',   // auto | solo | party (default auto)
-  LYRICS_VIA_HA: false,                                // stage-2 pre-wire; stage 1 stays on in-page lrclib
+  LYRICS_VIA_HA: true,                                 // lyric_train live (row 646); falls back to in-page lrclib
   EMPTY_POLLS_TO_IDLE: 2,        // two empty polls in a row (~6 s): no flicker on a gap
   FAIL_POLLS_TO_IDLE: 20,        // HA unreachable: hold the screen ~60 s
   PAUSE_IDLE_MS: 10 * 60 * 1000, // a record left paused this long goes idle
@@ -273,15 +273,23 @@ function parseLRC(lrc) {
 }
 const plainLines = t => t.split('\n').map(x => ({ time: null, text: x }));
 async function fetchLyrics(artist, track, album, duration) {
-  if (CONFIG.LYRICS_VIA_HA) {
-    try {
-      const u = `${HA}/api/lyrics?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`
-              + (album ? `&album=${encodeURIComponent(album)}` : '')
-              + (duration ? `&duration=${Math.round(duration)}` : '');
-      const res = await fetch(u, { headers: { 'Authorization': `Bearer ${TOKEN}` } });
-      if (res.ok) { const d = await res.json(); if (d && d.lines) return { lines: d.lines, synced: !!d.synced }; }
-    } catch (e) {}
-    return null;
+  if (CONFIG.LYRICS_VIA_HA) {          // HA lyric_train: contract-aware; falls back to in-page lrclib on miss/error/identity mismatch
+    const t0 = Date.now();
+    while (Date.now() - t0 < 9000) {
+      try {
+        const u = `${HA}/api/lyrics?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(track)}`
+                + (album ? `&album=${encodeURIComponent(album)}` : '')
+                + (duration ? `&duration=${Math.round(duration)}` : '');
+        const res = await fetch(u, { headers: { 'Authorization': `Bearer ${TOKEN}` } });
+        if (!res.ok) break;
+        const d = await res.json();
+        if (d.artist !== artist || d.title !== track) break;               // identity echo must match the ask
+        if (d.state === 'synced' && d.lyrics) return { lines: parseLRC(d.lyrics), synced: true };
+        if (d.state === 'plain' && d.lyrics)  return { lines: plainLines(d.lyrics), synced: false };
+        if (d.state === 'miss') break;                                      // explicit miss -> in-page lrclib
+      } catch (e) { break; }
+      await new Promise(r => setTimeout(r, 1500));                          // pending -> re-ask
+    }
   }
   try {
     let getUrl = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(track)}`;
