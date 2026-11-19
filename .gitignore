@@ -9,3 +9,4 @@
 
 # Local tooling (Claude Code preview-server config, etc.)
 .claude/
+__pycache__/
