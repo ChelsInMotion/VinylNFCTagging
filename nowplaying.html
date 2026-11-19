@@ -223,7 +223,7 @@ const bodyEl = document.body;
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const esc = s => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-const artEl = $('art'), bgImg = $('bgimg'), artWrap = $('art-wrap');
+const artEl = $('art'), bgImg = $('bgimg');
 const trackEl = $('track'), artistEl = $('artist'), albumEl = $('album'), idEl = $('id');
 const sleeveEl = $('sleeve'), sidesEl = $('sides'), railEl = $('rail'), paneEl = $('pane'), needleEl = $('needle');
 const lyrInner = $('lyr-inner'), lyrScroll = $('lyr-scroll'), stackEl = $('stack'), clockEl = $('clock');
